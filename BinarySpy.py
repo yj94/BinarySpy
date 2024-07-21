@@ -69,12 +69,13 @@ def execute():
     if not modify_pe_file_path.lower().endswith('.exe'):
         messagebox.showerror("错误", "待修改的PE文件必须是.exe格式。")
         return
-    
+
     if not va_input:
         messagebox.showinfo("VA为空", "未检测到VA输入,启动自动化patch")
-        va_input=find_main_function(modify_pe_file_path)
-        va_input=hex(va_input)
+        va_input = find_main_function(modify_pe_file_path)
+        va_input = hex(va_input)
         messagebox.showinfo("成功", f"获取到可能patch func va:{va_input}")
+    
     if not is_hex(va_input):
         messagebox.showerror("错误", "VA输入必须是一个有效的十六进制数。")
         return
@@ -97,138 +98,109 @@ def execute():
         return
     
     replace_text_section(modify_pe_file_path, text_bin_path, va)
-#自动patch代码段
+
+# 自动patch代码段
 def find_main_function(pe_path):
-    # 打开PE文件
     pe = pefile.PE(pe_path)
-    
-    # 设置Capstone反汇编引擎
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    
-    # 获取入口点RVA和VA
     entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
     entry_point_va = entry_point_rva + pe.OPTIONAL_HEADER.ImageBase
-    
-    # 读取入口点附近的代码
-    code_size = 0x100  # 读取100h字节的代码
-    code_rva = entry_point_rva - 0x10  # 从入口点前10h字节开始读取 目的是减少部分干扰
+    code_size = 0x100
+    code_rva = entry_point_rva - 0x10
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
-    
-    # 反汇编代码
     code_asm = list(md.disasm(code, code_va))
-    
-    # 寻找call jmp函数
-    call_jmp_count=0
-    crt_addr=None
+
+    call_jmp_count = 0
+    crt_addr = None
     for insn in code_asm:
-        if insn.mnemonic in ('jmp'):
-            call_jmp_count+=1
-            if call_jmp_count==1:
-                crt_addr=int(insn.op_str,16)
+        if insn.mnemonic == 'jmp':
+            call_jmp_count += 1
+            if call_jmp_count == 1:
+                crt_addr = int(insn.op_str, 16)
                 print(f'call jmp function VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
-    return find_by_crt(pe_path,crt_addr)
-def find_by_crt(pe_path,crt_addr):
-    # 打开PE文件
+    return find_by_crt(pe_path, crt_addr)
+
+def find_by_crt(pe_path, crt_addr):
     pe = pefile.PE(pe_path)
-    crt_addr_rva=va_to_rva(pe,crt_addr)
-    # 设置Capstone反汇编引擎
+    crt_addr_rva = va_to_rva(pe, crt_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    # 读取crt附近的代码
-    code_size = 0x300  # 读取300h字节的代码 这个参数不需要大调整
-    code_rva = crt_addr_rva - 0x10  # 从入口点前10h字节开始读取
+    code_size = 0x300
+    code_rva = crt_addr_rva - 0x10
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
-    
-    # 反汇编代码
     code_asm = list(md.disasm(code, code_va))
-    
+
     crt_r8_addr = None
     crt_r8_addr_count = 0
     for insn in code_asm:
-        if insn.mnemonic == 'mov':
-            # 检查操作数是否包含'r8'
-            if 'r8' in insn.op_str:
-                # 确保'r8'是一个寄存器操作数
-                if insn.op_str.find('r8') == 0:
-                    crt_r8_addr_count+=1
-                    if(crt_r8_addr_count==1):
-                        crt_r8_addr = insn.address
-                        print(f'CRT\'s mov r8 instruction VA: {crt_r8_addr:#x}\r\nOP_str: {insn.op_str}')
-    return find_by_r8(pe_path,crt_r8_addr)
-def find_by_r8(pe_path,crt_r8_addr):
-    # 打开PE文件
-    pe = pefile.PE(pe_path)
-    crt_r8_addr_rva=va_to_rva(pe,crt_r8_addr)
-    # 设置Capstone反汇编引擎
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    # 读取crt附近的代码
-    code_size = 0x50  # 读取50h字节的代码 因为r8寄存器与主函数离得近 这个参数需要调整
-    code_rva = crt_r8_addr_rva  # 从入口点开始读取
-    code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
-    code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
-    
-    # 反汇编代码
-    code_asm = list(md.disasm(code, code_va))
-    main_addr=None
-    main_addr_count=0
+        if insn.mnemonic == 'mov' and 'r8' in insn.op_str and insn.op_str.find('r8') == 0:
+            crt_r8_addr_count += 1
+            if crt_r8_addr_count == 1:
+                crt_r8_addr = insn.address
+                print(f'CRT\'s mov r8 instruction VA: {crt_r8_addr:#x}\r\nOP_str: {insn.op_str}')
+    return find_by_r8(pe_path, crt_r8_addr)
 
-    for insn in code_asm:
-        if insn.mnemonic == 'call':
-            #print(insn)
-            if(is_hex(insn.op_str)):
-                main_addr_count+=1
-                if(main_addr_count==1):
-                    main_addr=int(insn.op_str,16)
-                    print(f'main instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
-    return find_by_main(pe_path,main_addr)
-def find_by_main(pe_path,main_addr):
-    # 打开PE文件
+def find_by_r8(pe_path, crt_r8_addr):
     pe = pefile.PE(pe_path)
-    crt_main_addr_rva=va_to_rva(pe,main_addr)
-    # 设置Capstone反汇编引擎
+    crt_r8_addr_rva = va_to_rva(pe, crt_r8_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    code_size = 0x200 #读取200h字节的代码 这个参数不需要大调整 取决于主函数离最近可调用函数的偏移
-    code_rva = crt_main_addr_rva  # 从入口点开始读取
+    code_size = 0x50
+    code_rva = crt_r8_addr_rva
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
-    
-    # 反汇编代码
     code_asm = list(md.disasm(code, code_va))
-    patch_addr=None
+
+    main_addr = None
+    main_addr_count = 0
     for insn in code_asm:
-        if insn.mnemonic == 'call':
-            if(is_hex(insn.op_str)):
-                patch_addr=int(insn.op_str,16)
-                print("may patch:"+str(hex(patch_addr)))
-                if(filter_by_func_ret(pe_path,patch_addr)):
-                    print(f'patch func instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
-                    return patch_addr
-def filter_by_func_ret(pe_path,patch_addr):
-    # 打开PE文件
+        if insn.mnemonic == 'call' and is_hex(insn.op_str):
+            main_addr_count += 1
+            if main_addr_count == 1:
+                main_addr = int(insn.op_str, 16)
+                print(f'main instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+    return find_by_main(pe_path, main_addr)
+
+def find_by_main(pe_path, main_addr):
     pe = pefile.PE(pe_path)
-    patch_addr_rva=va_to_rva(pe,patch_addr)
-    # 设置Capstone反汇编引擎
+    crt_main_addr_rva = va_to_rva(pe, main_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    code_size = 0x4000 #读取4000h字节的代码 这么大是因为函数入口离ret的偏移一般都大
-    code_rva = patch_addr_rva 
+    code_size = 0x200
+    code_rva = crt_main_addr_rva
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
-    
-    # 反汇编代码
     code_asm = list(md.disasm(code, code_va))
-    patch_retn_addr=None
-    patch_addr_count=0
+
+    patch_addr = None
+    for insn in code_asm:
+        if insn.mnemonic == 'call' and is_hex(insn.op_str):
+            patch_addr = int(insn.op_str, 16)
+            print("may patch:" + str(hex(patch_addr)))
+            if filter_by_func_ret(pe_path, patch_addr):
+                print(f'patch func instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+                return patch_addr
+
+def filter_by_func_ret(pe_path, patch_addr):
+    pe = pefile.PE(pe_path)
+    patch_addr_rva = va_to_rva(pe, patch_addr)
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    code_size = 0x4000
+    code_rva = patch_addr_rva
+    code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
+    code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
+    code_asm = list(md.disasm(code, code_va))
+
+    patch_retn_addr = None
+    patch_addr_count = 0
     for insn in code_asm:
         if insn.mnemonic == 'ret':
-            patch_addr_count+=1
-            if(patch_addr_count==1):
-                patch_retn_addr=insn.address
+            patch_addr_count += 1
+            if patch_addr_count == 1:
+                patch_retn_addr = insn.address
                 print(f'patch func retn VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
-    print(patch_retn_addr-patch_addr)
-    if(patch_retn_addr-patch_addr>0x60): #函数开始地址和ret地址差值大于0x60才可被视为可用patch点
-        return True
-    
+    print(patch_retn_addr - patch_addr)
+    return patch_retn_addr - patch_addr > 0x60
+
 # 创建主窗口
 root = tk.Tk()
 root.title("BinarySpy")
