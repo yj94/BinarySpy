@@ -72,7 +72,7 @@ def execute():
 
     if not va_input:
         messagebox.showinfo("VA为空", "未检测到VA输入,启动自动化patch")
-        va_input = find_main_function(modify_pe_file_path)
+        va_input = find_crt_function(modify_pe_file_path)
         va_input = hex(va_input)
         messagebox.showinfo("成功", f"获取到可能patch func va:{va_input}")
     
@@ -100,7 +100,7 @@ def execute():
     replace_text_section(modify_pe_file_path, text_bin_path, va)
 
 # 自动patch代码段
-def find_main_function(pe_path):
+def find_crt_function(pe_path):
     pe = pefile.PE(pe_path)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
@@ -118,7 +118,7 @@ def find_main_function(pe_path):
             call_jmp_count += 1
             if call_jmp_count == 1:
                 crt_addr = int(insn.op_str, 16)
-                print(f'call jmp function VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+                print(f'CRT function VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
     return find_by_crt(pe_path, crt_addr)
 
 def find_by_crt(pe_path, crt_addr):
