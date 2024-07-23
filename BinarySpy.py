@@ -173,7 +173,7 @@ def find_by_main(pe_path, main_addr):
 
     patch_addr = None
     for insn in code_asm:
-        if insn.mnemonic == 'call' and is_hex(insn.op_str):
+        if (insn.mnemonic == 'call' or insn.mnemonic == 'jmp') and is_hex(insn.op_str):
             patch_addr = int(insn.op_str, 16)
             print("may patch:" + str(hex(patch_addr)))
             if filter_by_func_ret(pe_path, patch_addr):
