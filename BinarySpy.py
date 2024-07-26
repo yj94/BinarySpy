@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 import pefile
 import os
 import capstone
+from smda.Disassembler import Disassembler
 
 def va_to_rva(pe, va):
     image_base = pe.OPTIONAL_HEADER.ImageBase
@@ -13,20 +14,58 @@ def rva_to_offset(pe, rva):
         if section.VirtualAddress <= rva < section.VirtualAddress + section.SizeOfRawData:
             return rva - section.VirtualAddress + section.PointerToRawData
     return None
+def generate_new_filename(pe_file_path, index=1):
+    # 分割文件名和扩展名
+    file_parts = pe_file_path.rsplit('.', 1)
+    # 添加序号到文件名中
+    new_filename = f"{file_parts[0]}_{index}.{file_parts[1]}"
+    return new_filename
+def replace_text_section(pe_file_path, text_bin_path, va,flag):
+    if not flag:
+        pe = pefile.PE(pe_file_path)
+        rva = va_to_rva(pe, va)
+        file_offset = rva_to_offset(pe, rva)
+        if file_offset is None:
+            messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
+            return
+        with open(text_bin_path, 'rb') as f:
+            text_data = f.read()
+        with open(pe_file_path, 'r+b') as f:
+            f.seek(file_offset)
+            f.write(text_data)
+        messagebox.showinfo("成功", ".text节区已成功覆盖在PE文件中。")
+    if flag:
+        pe = pefile.PE(pe_file_path)
+        rva = va_to_rva(pe, va)
+        file_offset = rva_to_offset(pe, rva)
 
-def replace_text_section(pe_file_path, text_bin_path, va):
-    pe = pefile.PE(pe_file_path)
-    rva = va_to_rva(pe, va)
-    file_offset = rva_to_offset(pe, rva)
-    if file_offset is None:
-        messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
-        return
-    with open(text_bin_path, 'rb') as f:
-        text_data = f.read()
-    with open(pe_file_path, 'r+b') as f:
-        f.seek(file_offset)
-        f.write(text_data)
-    messagebox.showinfo("成功", ".text节区已成功覆盖在PE文件中。")
+        # 检查是否找到文件偏移
+        if file_offset is None:
+            messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
+            return
+
+        # 生成备份文件名
+        backup_pe_file_path = generate_new_filename(pe_file_path, 'backup')
+
+        # 复制原始文件到备份文件
+        with open(pe_file_path, 'rb') as f_in, open(backup_pe_file_path, 'wb') as f_out:
+            f_out.write(f_in.read())
+
+        # 读取新的.text节区数据
+        with open(text_bin_path, 'rb') as f:
+            text_data = f.read()
+
+        # 生成新的文件名
+        new_pe_file_path = generate_new_filename(pe_file_path)
+
+        # 在新文件中写入原始内容，并覆盖.text节区
+        with open(backup_pe_file_path, 'rb') as f_in, open(new_pe_file_path, 'wb') as f_out:
+            f_out.write(f_in.read())
+            f_out.seek(file_offset)
+            f_out.write(text_data)
+
+        # 显示成功消息
+        messagebox.showinfo("成功", f".text节区已成功覆盖在PE文件中，并保存为副本: {new_pe_file_path}")
 
 def extract_text_section(pe_path, output_path):
     pe = pefile.PE(pe_path)
@@ -97,7 +136,7 @@ def execute():
         messagebox.showerror("错误", "提供的文件必须是PE文件或.text文件。")
         return
     
-    replace_text_section(modify_pe_file_path, text_bin_path, va)
+    replace_text_section(modify_pe_file_path, text_bin_path, va,False)
 
 # 自动patch代码段
 def find_crt_function(pe_path):
@@ -140,8 +179,9 @@ def find_by_crt(pe_path, crt_addr):
                 crt_r8_addr = insn.address
                 print(f'CRT\'s mov r8 instruction VA: {crt_r8_addr:#x}\r\nOP_str: {insn.op_str}')
     return find_by_r8(pe_path, crt_r8_addr)
-
+main_addr = None
 def find_by_r8(pe_path, crt_r8_addr):
+    global main_addr
     pe = pefile.PE(pe_path)
     crt_r8_addr_rva = va_to_rva(pe, crt_r8_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
@@ -151,7 +191,6 @@ def find_by_r8(pe_path, crt_r8_addr):
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
     code_asm = list(md.disasm(code, code_va))
 
-    main_addr = None
     main_addr_count = 0
     for insn in code_asm:
         if insn.mnemonic == 'call' and is_hex(insn.op_str):
@@ -159,6 +198,8 @@ def find_by_r8(pe_path, crt_r8_addr):
             if main_addr_count == 1:
                 main_addr = int(insn.op_str, 16)
                 print(f'main instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+    if fuzzing:
+        return
     return find_by_main(pe_path, main_addr)
 
 def find_by_main(pe_path, main_addr):
@@ -200,6 +241,71 @@ def filter_by_func_ret(pe_path, patch_addr):
                 print(f'patch func retn VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
     print(patch_retn_addr - patch_addr)
     return patch_retn_addr - patch_addr > 0x60
+    
+fuzz_count=-1
+modify_pe_file_path=None
+va_list=[]
+def fuzz():
+    global fuzzing
+    global fuzz_count
+    global modify_pe_file_path
+    global va_list
+
+    fuzzing=True
+    print("count:"+str(fuzz_count))
+    fuzz_count+=1
+    modify_pe_file_path = modify_pe_file_entry.get()
+    text_or_pe_path = text_bin_path_entry.get()
+
+    if not modify_pe_file_path or not text_or_pe_path:
+        messagebox.showerror("错误", "输入不能为空。")
+        return
+
+    if not modify_pe_file_path.lower().endswith('.exe'):
+        messagebox.showerror("错误", "待修改的PE文件必须是.exe格式。")
+        return
+        
+    if text_or_pe_path.lower().endswith('.exe'):
+        if not check_file_readable(text_or_pe_path):
+            messagebox.showerror("错误", "PE文件不可读或不存在。")
+            return
+        text_bin_path = text_or_pe_path + ".text"
+        extract_text_section(text_or_pe_path, text_bin_path)
+    elif text_or_pe_path.lower().endswith('.text'):
+        if not check_file_readable(text_or_pe_path):
+            messagebox.showerror("错误", ".text文件不可读或不存在。")
+            return
+        text_bin_path = text_or_pe_path
+    else:
+        messagebox.showerror("错误", "提供的文件必须是PE文件或.text文件。")
+        return
+    if fuzz_count==0:
+        va_list=fuzz_run()
+        print("fuzzing list:"+str(va_list))
+    print("out of"+str(va_list))
+    if fuzz_count>=len(va_list):
+        messagebox.showerror("错误", "fuzz的函数列表已经用光")
+        return
+    else:
+        va=int(va_list[fuzz_count],16)
+        print("fuzzing...patching...:"+hex(va))
+    replace_text_section(modify_pe_file_path, text_bin_path, va,True)
+def fuzz_run():
+    print("fuzzing...")
+    find_crt_function(modify_pe_file_path)
+    fuzz_patch=[]
+    disassembler = Disassembler()
+    report = disassembler.disassembleFile(modify_pe_file_path)
+    print(report)
+    functions = report.getFunctions()
+    for function in functions:
+        if function.num_inrefs ==1:
+            for j in (function.getCodeInrefs()):
+                if((j.smda_ins_from.smda_function.offset)==main_addr):
+                    print("fuzz patch:"+hex(function.offset))
+                    fuzz_patch.append(hex(function.offset))
+    return fuzz_patch
+
 
 # 创建主窗口
 root = tk.Tk()
@@ -226,7 +332,9 @@ text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_fil
 text_bin_path_button.pack()
 
 execute_button = tk.Button(root, text="执行", command=execute)
+fuzz_button = tk.Button(root, text="fuzz", command=fuzz)
 execute_button.pack()
+fuzz_button.pack()
 
 # 运行主循环
 root.mainloop()
