@@ -330,6 +330,7 @@ execute_button = tk.Button(root, text="执行", command=execute)
 fuzz_button = tk.Button(root, text="fuzz", command=fuzz)
 execute_button.pack()
 fuzz_button.pack()
+root.iconbitmap("logo.ico")
 
 # 运行主循环
 root.mainloop()
