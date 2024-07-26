@@ -16,8 +16,9 @@
   + 自动:无需填写VA
 + 待覆盖的.text文件就是shellcode的text段
   + 内容可自动提取或者选择非.exe结尾的文件作为.text文件
++ 可选fuzz模式，操作同上，但是会生成多个patch后的文件
 + 最后,点击执行即可
-+ 注意:仅限于x64的程序patch且语言为C,其他语言适配请等更新
++ 注意:仅限于x64的程序patch且语言为C,其他语言适配请等更新,shellcode请自己实现,calc的shellcode特征已被标记
 
 # 一种基于patch免杀技术的自动化实现
 
