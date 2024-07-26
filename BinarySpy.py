@@ -57,7 +57,7 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
                 f_out.seek(file_offset)
                 f_out.write(text_data)
 
-        messagebox.showinfo("成功", f".text节区已成功覆盖在PE文件中，fuzz文件保存在：{new_file_path}")
+        print(f".text节区已成功覆盖在PE文件中，fuzz文件保存在：{new_file_path}")
 
 def extract_text_section(pe_path, output_path):
     pe = pefile.PE(pe_path)
@@ -278,12 +278,12 @@ def fuzz():
         print("fuzzing list:"+str(va_list))
     print("out of"+str(va_list))
     if fuzz_count>=len(va_list):
-        messagebox.showerror("错误", "fuzz的函数列表已经用光")
+        messagebox.showerror("错误", "fuzz的函数列表已经用光,重启工具以开启新一轮fuzz")
         return
     else:
-        for _ in range(len(va_list)-1):
+        for i in range(len(va_list)):
             fuzz_count+=1
-            va=int(va_list[fuzz_count],16)
+            va=int(va_list[i],16)
             print("fuzzing...patching...:"+hex(va))
             replace_text_section(modify_pe_file_path, text_bin_path, va,True)
 def fuzz_run():
