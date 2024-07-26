@@ -14,12 +14,7 @@ def rva_to_offset(pe, rva):
         if section.VirtualAddress <= rva < section.VirtualAddress + section.SizeOfRawData:
             return rva - section.VirtualAddress + section.PointerToRawData
     return None
-def generate_new_filename(pe_file_path, index=1):
-    # 分割文件名和扩展名
-    file_parts = pe_file_path.rsplit('.', 1)
-    # 添加序号到文件名中
-    new_filename = f"{file_parts[0]}_{index}.{file_parts[1]}"
-    return new_filename
+
 def replace_text_section(pe_file_path, text_bin_path, va,flag):
     if not flag:
         pe = pefile.PE(pe_file_path)
@@ -38,34 +33,31 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
         pe = pefile.PE(pe_file_path)
         rva = va_to_rva(pe, va)
         file_offset = rva_to_offset(pe, rva)
-
-        # 检查是否找到文件偏移
         if file_offset is None:
             messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
             return
 
-        # 生成备份文件名
-        backup_pe_file_path = generate_new_filename(pe_file_path, 'backup')
-
-        # 复制原始文件到备份文件
-        with open(pe_file_path, 'rb') as f_in, open(backup_pe_file_path, 'wb') as f_out:
-            f_out.write(f_in.read())
-
-        # 读取新的.text节区数据
+        # 读取.text节区数据
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
 
-        # 生成新的文件名
-        new_pe_file_path = generate_new_filename(pe_file_path)
+        # 创建新的文件名，添加序号
+        base_name, ext = os.path.splitext(pe_file_path)
+        counter = 0
+        new_file_path = f"{base_name}_fuzz_{counter}{ext}"
+        while os.path.exists(new_file_path):
+            counter += 1
+            new_file_path = f"{base_name}_fuzz_{counter}{ext}"
 
-        # 在新文件中写入原始内容，并覆盖.text节区
-        with open(backup_pe_file_path, 'rb') as f_in, open(new_pe_file_path, 'wb') as f_out:
-            f_out.write(f_in.read())
-            f_out.seek(file_offset)
-            f_out.write(text_data)
+        # 写入新的PE文件
+        with open(pe_file_path, 'rb') as f_in:
+            with open(new_file_path, 'wb') as f_out:
+                f_in.seek(0)
+                f_out.write(f_in.read())
+                f_out.seek(file_offset)
+                f_out.write(text_data)
 
-        # 显示成功消息
-        messagebox.showinfo("成功", f".text节区已成功覆盖在PE文件中，并保存为副本: {new_pe_file_path}")
+        messagebox.showinfo("成功", f".text节区已成功覆盖在PE文件中，fuzz文件保存在：{new_file_path}")
 
 def extract_text_section(pe_path, output_path):
     pe = pefile.PE(pe_path)
@@ -97,6 +89,8 @@ def check_file_readable(file_path):
     return os.path.isfile(file_path) and os.access(file_path, os.R_OK)
 
 def execute():
+    global fuzzing
+    fuzzing = False
     modify_pe_file_path = modify_pe_file_entry.get()
     va_input = va_entry.get()
     text_or_pe_path = text_bin_path_entry.get()
@@ -287,9 +281,11 @@ def fuzz():
         messagebox.showerror("错误", "fuzz的函数列表已经用光")
         return
     else:
-        va=int(va_list[fuzz_count],16)
-        print("fuzzing...patching...:"+hex(va))
-    replace_text_section(modify_pe_file_path, text_bin_path, va,True)
+        for _ in range(len(va_list)-1):
+            fuzz_count+=1
+            va=int(va_list[fuzz_count],16)
+            print("fuzzing...patching...:"+hex(va))
+            replace_text_section(modify_pe_file_path, text_bin_path, va,True)
 def fuzz_run():
     print("fuzzing...")
     find_crt_function(modify_pe_file_path)
