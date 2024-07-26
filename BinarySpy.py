@@ -159,7 +159,7 @@ def find_by_crt(pe_path, crt_addr):
     crt_addr_rva = va_to_rva(pe, crt_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     code_size = 0x300
-    code_rva = crt_addr_rva - 0x10
+    code_rva = crt_addr_rva
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
     code_asm = list(md.disasm(code, code_va))
@@ -276,7 +276,6 @@ def fuzz():
     if fuzz_count==0:
         va_list=fuzz_run()
         print("fuzzing list:"+str(va_list))
-    print("out of"+str(va_list))
     if fuzz_count>=len(va_list):
         messagebox.showerror("错误", "fuzz的函数列表已经用光,重启工具以开启新一轮fuzz")
         return
