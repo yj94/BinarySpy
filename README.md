@@ -19,8 +19,18 @@
 + 可选fuzz模式，操作同上，但是会生成多个patch后的文件
 + 最后,点击执行即可
 + 注意:仅限于x64的程序patch且语言为C,其他语言适配请等更新,shellcode请自己实现,calc的shellcode特征已被标记
++ ![1722243483254](image/README/1722243483254.gif)
 
-## 3.效果
+## 3.一些问题
+
++ shellcode
+  + 开发模板 [https://github.com/clownfive/CppDevShellcode](https://github.com/clownfive/CppDevShellcode)
+  + 建议远程加载cs的shellcode以减少体积
++ 白文件(待patch文件)
+  + 尽量选体积较大的文件
+  + 尽量选择子系统不为控制台的文件(黑框)
+
+## 4.效果
 
 > 截止2024年7月27日 shellcode为自行编写
 
