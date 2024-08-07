@@ -29,6 +29,7 @@
 + 白文件(待patch文件)
   + 尽量选体积较大的文件
   + 尽量选择子系统不为控制台的文件(黑框)
+    + 解决方法：https://github.com/yj94/BinarySpy/issues/1
 
 ## 4.效果
 
