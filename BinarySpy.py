@@ -99,7 +99,7 @@ def execute():
         messagebox.showerror("错误", "输入不能为空。")
         return
 
-    if not modify_pe_file_path.lower().endswith('.exe'):
+    if not (modify_pe_file_path.lower().endswith('.exe') or modify_pe_file_path.lower().endswith('.dll')):
         messagebox.showerror("错误", "待修改的PE文件必须是.exe格式。")
         return
 
@@ -255,7 +255,7 @@ def fuzz():
         messagebox.showerror("错误", "输入不能为空。")
         return
 
-    if not modify_pe_file_path.lower().endswith('.exe'):
+    if not (modify_pe_file_path.lower().endswith('.exe') or modify_pe_file_path.lower().endswith('.dll')):
         messagebox.showerror("错误", "待修改的PE文件必须是.exe格式。")
         return
         
