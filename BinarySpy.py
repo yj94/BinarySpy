@@ -311,7 +311,7 @@ modify_pe_file_label = tk.Label(root, text="待修改的PE文件路径:")
 modify_pe_file_label.pack()
 modify_pe_file_entry = tk.Entry(root, width=50)
 modify_pe_file_entry.pack()
-modify_pe_file_button = tk.Button(root, text="浏览", command=lambda: browse_file(modify_pe_file_entry, "选择待修改的PE文件", [("PE文件", "*.exe")]))
+modify_pe_file_button = tk.Button(root, text="浏览", command=lambda: browse_file(modify_pe_file_entry, "选择待修改的PE文件", [("PE文件", "*.exe *.dll")]))
 modify_pe_file_button.pack()
 
 va_label = tk.Label(root, text="要修改PE文件的VA (十六进制):")
