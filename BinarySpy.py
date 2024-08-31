@@ -57,7 +57,7 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
                 f_out.seek(file_offset)
                 f_out.write(text_data)
 
-        print(f".text节区已成功覆盖在PE文件中，fuzz文件保存在：{new_file_path}")
+        print(f" -> {new_file_path}")
 
 def extract_text_section(pe_path, output_path):
     pe = pefile.PE(pe_path)
@@ -90,6 +90,8 @@ def check_file_readable(file_path):
 
 def execute():
     global fuzzing
+    global w_func_size
+    global func_size_list
     fuzzing = False
     modify_pe_file_path = modify_pe_file_entry.get()
     va_input = va_entry.get()
@@ -105,15 +107,19 @@ def execute():
 
     if not va_input:
         messagebox.showinfo("VA为空", "未检测到VA输入,启动自动化patch")
+        w_func_size = int(func_size_entry.get())
         va_input = find_crt_function(modify_pe_file_path)
-        va_input = hex(va_input)
-        messagebox.showinfo("成功", f"获取到可能patch func va:{va_input}")
-    
-    if not is_hex(va_input):
-        messagebox.showerror("错误", "VA输入必须是一个有效的十六进制数。")
-        return
-
-    va = int(va_input, 16)
+        size_max=max(func_size_list)
+        if(va_input==None):
+            messagebox.showerror("错误", f"输入的patch函数大小过大,请限定在 {size_max} bytes")
+        else:
+            va_input = hex(va_input)
+            messagebox.showinfo("成功", f"获取到可能patch func va:{va_input}")
+    if va_input != None:
+        if not is_hex(va_input):
+            messagebox.showerror("错误", "VA输入必须是一个有效的十六进制数。")
+            return
+        va = int(va_input, 16)
 
     if text_or_pe_path.lower().endswith('.exe'):
         if not check_file_readable(text_or_pe_path):
@@ -151,7 +157,7 @@ def find_crt_function(pe_path):
             call_jmp_count += 1
             if call_jmp_count == 1:
                 crt_addr = int(insn.op_str, 16)
-                print(f'CRT function VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+                print(f'CRT VA: {insn.address:#x} -> OP_str: {insn.op_str}')
     return find_by_crt(pe_path, crt_addr)
 
 def find_by_crt(pe_path, crt_addr):
@@ -171,7 +177,7 @@ def find_by_crt(pe_path, crt_addr):
             crt_r8_addr_count += 1
             if crt_r8_addr_count == 1:
                 crt_r8_addr = insn.address
-                print(f'CRT\'s mov r8 instruction VA: {crt_r8_addr:#x}\r\nOP_str: {insn.op_str}')
+                print(f'mov r8 VA: {crt_r8_addr:#x} -> OP_str: {insn.op_str}')
     return find_by_r8(pe_path, crt_r8_addr)
 main_addr = None
 def find_by_r8(pe_path, crt_r8_addr):
@@ -191,7 +197,7 @@ def find_by_r8(pe_path, crt_r8_addr):
             main_addr_count += 1
             if main_addr_count == 1:
                 main_addr = int(insn.op_str, 16)
-                print(f'main instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+                print(f'main VA: {insn.address:#x} -> OP_str: {insn.op_str}')
     if fuzzing:
         return
     return find_by_main(pe_path, main_addr)
@@ -210,12 +216,15 @@ def find_by_main(pe_path, main_addr):
     for insn in code_asm:
         if (insn.mnemonic == 'call' or insn.mnemonic == 'jmp') and is_hex(insn.op_str):
             patch_addr = int(insn.op_str, 16)
-            print("may patch:" + str(hex(patch_addr)))
+            print(" -> may patch -> " + str(hex(patch_addr)))
             if filter_by_func_ret(pe_path, patch_addr):
-                print(f'patch func instruction VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
+                print(f' -> patch VA: {insn.address:#x} -> OP_str: {insn.op_str}')
                 return patch_addr
 
+func_size_list=[]
 def filter_by_func_ret(pe_path, patch_addr):
+    global w_func_size
+    global func_size_list
     pe = pefile.PE(pe_path)
     patch_addr_rva = va_to_rva(pe, patch_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
@@ -224,7 +233,6 @@ def filter_by_func_ret(pe_path, patch_addr):
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
     code_asm = list(md.disasm(code, code_va))
-
     patch_retn_addr = None
     patch_addr_count = 0
     for insn in code_asm:
@@ -232,10 +240,13 @@ def filter_by_func_ret(pe_path, patch_addr):
             patch_addr_count += 1
             if patch_addr_count == 1:
                 patch_retn_addr = insn.address
-                print(f'patch func retn VA: {insn.address:#x}\r\nOP_str: {insn.op_str}')
-    print(patch_retn_addr - patch_addr)
-    return patch_retn_addr - patch_addr > 0x60
-    
+                print(f'ret VA: {insn.address:#x} -> OP_str: {insn.op_str}')
+                func_size=patch_retn_addr - patch_addr
+            func_size_list.append(func_size)
+    print(" func size -> "+str(func_size),end="")
+    return func_size >= w_func_size
+        
+
 fuzz_count=-1
 modify_pe_file_path=None
 va_list=[]
@@ -246,7 +257,6 @@ def fuzz():
     global va_list
 
     fuzzing=True
-    print("count:"+str(fuzz_count))
     fuzz_count+=1
     modify_pe_file_path = modify_pe_file_entry.get()
     text_or_pe_path = text_bin_path_entry.get()
@@ -275,59 +285,68 @@ def fuzz():
         return
     if fuzz_count==0:
         va_list=fuzz_run()
-        print("fuzzing list:"+str(va_list))
+        print("fuzzing list -> "+str(va_list))
     if fuzz_count>=len(va_list):
-        messagebox.showerror("错误", "fuzz的函数列表已经用光,重启工具以开启新一轮fuzz")
+        messagebox.showinfo("提示", "fuzz的函数列表已经用光,请手动启动新一轮fuzz")
+        va_list.clear()
+        fuzz_count=-1
         return
     else:
         for i in range(len(va_list)):
             fuzz_count+=1
             va=int(va_list[i],16)
-            print("fuzzing...patching...:"+hex(va))
+            print("fuzzing - > "+hex(va),end="")
             replace_text_section(modify_pe_file_path, text_bin_path, va,True)
+
 def fuzz_run():
     print("fuzzing...")
+    #获取main函数的地址
     find_crt_function(modify_pe_file_path)
     fuzz_patch=[]
     disassembler = Disassembler()
     report = disassembler.disassembleFile(modify_pe_file_path)
     print(report)
     functions = report.getFunctions()
+    #用解释器遍历所有函数,找到被调用一次的函数
     for function in functions:
         if function.num_inrefs ==1:
             for j in (function.getCodeInrefs()):
                 if((j.smda_ins_from.smda_function.offset)==main_addr):
-                    print("fuzz patch:"+hex(function.offset))
+                    #print("fuzz patch:"+hex(function.offset))
                     fuzz_patch.append(hex(function.offset))
     return fuzz_patch
 
-
 # 创建主窗口
 root = tk.Tk()
-root.title("BinarySpy")
+root.title("BinarySpy By 余吉")
 
 # 创建界面元素
-modify_pe_file_label = tk.Label(root, text="待修改的PE文件路径:")
+modify_pe_file_label = tk.Label(root, text="待patch的PE文件路径:")
 modify_pe_file_label.pack()
 modify_pe_file_entry = tk.Entry(root, width=50)
 modify_pe_file_entry.pack()
 modify_pe_file_button = tk.Button(root, text="浏览", command=lambda: browse_file(modify_pe_file_entry, "选择待修改的PE文件", [("PE文件", "*.exe *.dll")]))
 modify_pe_file_button.pack()
 
-va_label = tk.Label(root, text="要修改PE文件的VA (十六进制):")
+va_label = tk.Label(root, text="待patch的PE文件VA (十六进制):")
 va_label.pack()
 va_entry = tk.Entry(root)
 va_entry.pack()
 
-text_or_pe_label = tk.Label(root, text="待覆盖的.text文件路径或待提取.text段的PE文件路径:")
+func_size_label = tk.Label(root, text="待patch的函数大小 (大于等于):")
+func_size_label.pack()
+func_size_entry = tk.Entry(root)
+func_size_entry.pack()
+
+text_or_pe_label = tk.Label(root, text="待patch的.text文件或pe文件路径:")
 text_or_pe_label.pack()
 text_bin_path_entry = tk.Entry(root, width=50)
 text_bin_path_entry.pack()
-text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_file(text_bin_path_entry, "选择待覆盖的.text文件或待提取的PE文件", [("所有文件", "*.*")]))
+text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_file(text_bin_path_entry, "待patch的.text文件或pe文件", [("所有文件", "*.*")]))
 text_bin_path_button.pack()
 
 execute_button = tk.Button(root, text="执行", command=execute)
-fuzz_button = tk.Button(root, text="fuzz", command=fuzz)
+fuzz_button = tk.Button(root, text="Fuzz", command=fuzz)
 execute_button.pack()
 fuzz_button.pack()
 root.iconbitmap("logo.ico")
