@@ -10,14 +10,15 @@
 
 ## 2.使用方法
 
-+ 待修改的pe文件路径就是要被patch shellcode的pe文件
++ 待patch的pe文件路径就是要被patch shellcode的pe文件
 + VA
-  + 手动:要修改PE文件的VA就是该pe文件的要被patch虚拟地址
-  + 自动:无需填写VA
-+ 待覆盖的.text文件就是shellcode的text段
+  + 手动: **[待PE文件的VA]** 就是该pe文件的要被patch虚拟地址
+  + 自动:无需填写VA，但需填写 **[patch的函数大小]**
+  + Fuzz:只需填写 **[待patch的PE文件路径]** 和 **[待patch的.text或pe文件路径]**
++ **[待patch的.text或pe文件路径]** 就是shellcode的text段
   + 内容可自动提取或者选择非.exe结尾的文件作为.text文件
-+ 可选fuzz模式，操作同上，但是会生成多个patch后的文件
-+ 最后,点击执行即可
++ 可选Fuzz模式，会生成多个patch后的文件
++ 最后,点击执行或者Fuzz即可
 + 注意:仅限于x64的程序patch且语言为C,其他语言适配请等更新,shellcode请自己实现,calc的shellcode特征已被标记
 + ![1722243483254](image/README/1722243483254.gif)
 
