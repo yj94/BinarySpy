@@ -21,7 +21,7 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
         rva = va_to_rva(pe, va)
         file_offset = rva_to_offset(pe, rva)
         if file_offset is None:
-            messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
+            messagebox.showerror("错误", "无法找到对应的文件偏移,RVA 可能不在任何节区中。")
             return
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
@@ -34,14 +34,14 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
         rva = va_to_rva(pe, va)
         file_offset = rva_to_offset(pe, rva)
         if file_offset is None:
-            messagebox.showerror("错误", "无法找到对应的文件偏移，RVA 可能不在任何节区中。")
+            messagebox.showerror("错误", "无法找到对应的文件偏移,RVA 可能不在任何节区中。")
             return
 
         # 读取.text节区数据
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
 
-        # 创建新的文件名，添加序号
+        # 创建新的文件名,添加序号
         base_name, ext = os.path.splitext(pe_file_path)
         counter = 0
         new_file_path = f"{base_name}_fuzz_{counter}{ext}"
@@ -93,10 +93,10 @@ def execute():
     global w_func_size
     global func_size_list
     fuzzing = False
+    func_size_list=[]
     modify_pe_file_path = modify_pe_file_entry.get()
     va_input = va_entry.get()
     text_or_pe_path = text_bin_path_entry.get()
-
     if not modify_pe_file_path or not text_or_pe_path:
         messagebox.showerror("错误", "输入不能为空。")
         return
@@ -107,7 +107,11 @@ def execute():
 
     if not va_input:
         messagebox.showinfo("VA为空", "未检测到VA输入,启动自动化patch")
-        w_func_size = int(func_size_entry.get())
+        if(not func_size_entry.get()):
+            w_func_size = os.path.getsize(text_or_pe_path)
+            messagebox.showinfo("信息", f"未输入size,默认为选择的.text段大小 {w_func_size} bytes")
+        else:
+            w_func_size = int(func_size_entry.get())
         va_input = find_crt_function(modify_pe_file_path)
         size_max=max(func_size_list)
         if(va_input==None):
@@ -338,18 +342,22 @@ func_size_label.pack()
 func_size_entry = tk.Entry(root)
 func_size_entry.pack()
 
-text_or_pe_label = tk.Label(root, text="待patch的.text文件或pe文件路径:")
+text_or_pe_label = tk.Label(root, text="待patch的.text文件或PE文件路径:")
 text_or_pe_label.pack()
 text_bin_path_entry = tk.Entry(root, width=50)
 text_bin_path_entry.pack()
-text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_file(text_bin_path_entry, "待patch的.text文件或pe文件", [("所有文件", "*.*")]))
+text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_file(text_bin_path_entry, "待patch的.text文件或PE文件", [("所有文件", "*.*")]))
 text_bin_path_button.pack()
 
 execute_button = tk.Button(root, text="执行", command=execute)
 fuzz_button = tk.Button(root, text="Fuzz", command=fuzz)
 execute_button.pack()
 fuzz_button.pack()
-root.iconbitmap("logo.ico")
+ico="logo.ico"
+if os.path.exists(ico):
+    root.iconbitmap(ico)
+else:
+    print(f"图标文件 {ico} 不存在，未设置窗口图标。")
 
 # 运行主循环
 root.mainloop()
