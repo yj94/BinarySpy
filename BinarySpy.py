@@ -25,9 +25,11 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
             return
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
+        f.close()
         with open(pe_file_path, 'r+b') as f:
             f.seek(file_offset)
             f.write(text_data)
+        f.close()
         messagebox.showinfo("成功", ".text节区已成功覆盖在PE文件中。")
     if flag:
         pe = pefile.PE(pe_file_path)
@@ -40,7 +42,7 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
         # 读取.text节区数据
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
-
+        f.close()
         # 创建新的文件名,添加序号
         base_name, ext = os.path.splitext(pe_file_path)
         counter = 0
@@ -56,7 +58,7 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
                 f_out.write(f_in.read())
                 f_out.seek(file_offset)
                 f_out.write(text_data)
-
+        f.close
         print(f" -> {new_file_path}")
 
 def extract_text_section(pe_path, output_path):
@@ -68,6 +70,7 @@ def extract_text_section(pe_path, output_path):
         if b'.text' in section.Name:
             with open(output_path, 'wb') as f:
                 f.write(section.get_data())
+            f.close()
             messagebox.showinfo("成功", ".text节区已提取并保存。")
             return
     messagebox.showerror("错误", "没有找到.text节区")
