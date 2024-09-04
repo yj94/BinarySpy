@@ -42,7 +42,13 @@
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yj94/BinarySpy&type=Date)](https://star-history.com/#yj94/BinarySpy&Date)
+<a href="https://star-history.com/#yj94/BinarySpy&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yj94/BinarySpy&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yj94/BinarySpy&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yj94/BinarySpy&type=Date" />
+ </picture>
+</a>
 # 一种基于patch免杀技术的自动化实现
 
 ## 起因
