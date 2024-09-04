@@ -40,6 +40,9 @@
 + ![1722058826723](image/README/1722058826723.png)
 + ![1722059388241](image/README/1722059388241.png)
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yj94/BinarySpy&type=Date)](https://star-history.com/#yj94/BinarySpy&Date)
 # 一种基于patch免杀技术的自动化实现
 
 ## 起因
