@@ -142,7 +142,6 @@ def execute():
     else:
         messagebox.showerror("错误", "提供的文件必须是PE文件或.text文件。")
         return
-    
     replace_text_section(modify_pe_file_path, text_bin_path, va,False)
 
 # 自动patch代码段
@@ -150,7 +149,6 @@ def find_crt_function(pe_path):
     pe = pefile.PE(pe_path)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     entry_point_rva = pe.OPTIONAL_HEADER.AddressOfEntryPoint
-    entry_point_va = entry_point_rva + pe.OPTIONAL_HEADER.ImageBase
     code_size = 0x100
     code_rva = entry_point_rva - 0x10
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
@@ -186,6 +184,7 @@ def find_by_crt(pe_path, crt_addr):
                 crt_r8_addr = insn.address
                 print(f'mov r8 VA: {crt_r8_addr:#x} -> OP_str: {insn.op_str}')
     return find_by_r8(pe_path, crt_r8_addr)
+
 main_addr = None
 def find_by_r8(pe_path, crt_r8_addr):
     global main_addr
@@ -213,7 +212,7 @@ def find_by_main(pe_path, main_addr):
     pe = pefile.PE(pe_path)
     crt_main_addr_rva = va_to_rva(pe, main_addr)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    code_size = 0x200
+    code_size = 0x4000
     code_rva = crt_main_addr_rva
     code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
     code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
@@ -252,7 +251,6 @@ def filter_by_func_ret(pe_path, patch_addr):
             func_size_list.append(func_size)
     print(" func size -> "+str(func_size),end="")
     return func_size >= w_func_size
-        
 
 fuzz_count=-1
 modify_pe_file_path=None
