@@ -15,23 +15,8 @@ def rva_to_offset(pe, rva):
             return rva - section.VirtualAddress + section.PointerToRawData
     return None
 
-def replace_text_section(pe_file_path, text_bin_path, va,flag):
-    if not flag:
-        pe = pefile.PE(pe_file_path)
-        rva = va_to_rva(pe, va)
-        file_offset = rva_to_offset(pe, rva)
-        if file_offset is None:
-            messagebox.showerror("错误", "无法找到对应的文件偏移,RVA 可能不在任何节区中。")
-            return
-        with open(text_bin_path, 'rb') as f:
-            text_data = f.read()
-        f.close()
-        with open(pe_file_path, 'r+b') as f:
-            f.seek(file_offset)
-            f.write(text_data)
-        f.close()
-        messagebox.showinfo("成功", ".text节区已成功覆盖在PE文件中。")
-    if flag:
+def replace_text_section(pe_file_path, text_bin_path, va, flag):
+    try:
         pe = pefile.PE(pe_file_path)
         rva = va_to_rva(pe, va)
         file_offset = rva_to_offset(pe, rva)
@@ -39,41 +24,48 @@ def replace_text_section(pe_file_path, text_bin_path, va,flag):
             messagebox.showerror("错误", "无法找到对应的文件偏移,RVA 可能不在任何节区中。")
             return
 
-        # 读取.text节区数据
         with open(text_bin_path, 'rb') as f:
             text_data = f.read()
-        f.close()
-        # 创建新的文件名,添加序号
-        base_name, ext = os.path.splitext(pe_file_path)
-        counter = 0
-        new_file_path = f"{base_name}_fuzz_{counter}{ext}"
-        while os.path.exists(new_file_path):
-            counter += 1
+
+        if not flag:
+            with open(pe_file_path, 'r+b') as f:
+                f.seek(file_offset)
+                f.write(text_data)
+            messagebox.showinfo("成功", ".text节区已成功覆盖在PE文件中。")
+        else:
+            base_name, ext = os.path.splitext(pe_file_path)
+            counter = 0
             new_file_path = f"{base_name}_fuzz_{counter}{ext}"
+            while os.path.exists(new_file_path):
+                counter += 1
+                new_file_path = f"{base_name}_fuzz_{counter}{ext}"
 
-        # 写入新的PE文件
-        with open(pe_file_path, 'rb') as f_in:
-            with open(new_file_path, 'wb') as f_out:
-                f_in.seek(0)
+            with open(pe_file_path, 'rb') as f_in, open(new_file_path, 'wb') as f_out:
                 f_out.write(f_in.read())
                 f_out.seek(file_offset)
                 f_out.write(text_data)
-        f.close
-        print(f" -> {new_file_path}")
+            print(f" -> {new_file_path}")
+    finally:
+        if 'pe' in locals():
+            pe.close()
 
 def extract_text_section(pe_path, output_path):
-    pe = pefile.PE(pe_path)
-    if pe is None:
-        messagebox.showerror("错误", "PE文件加载失败。")
-        return
-    for section in pe.sections:
-        if b'.text' in section.Name:
-            with open(output_path, 'wb') as f:
-                f.write(section.get_data())
-            f.close()
-            messagebox.showinfo("成功", ".text节区已提取并保存。")
+    try:
+        pe = pefile.PE(pe_path)
+        if pe is None:
+            messagebox.showerror("错误", "PE文件加载失败。")
             return
-    messagebox.showerror("错误", "没有找到.text节区")
+
+        for section in pe.sections:
+            if b'.text' in section.Name:
+                with open(output_path, 'wb') as f:
+                    f.write(section.get_data())
+                messagebox.showinfo("成功", ".text节区已提取并保存。")
+                return
+        messagebox.showerror("错误", "没有找到.text节区")
+    finally:
+        if 'pe' in locals():
+            pe.close()
 
 def browse_file(entry, title, filetypes):
     file_path = filedialog.askopenfilename(title=title, filetypes=filetypes)
