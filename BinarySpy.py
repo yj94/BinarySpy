@@ -252,6 +252,7 @@ def fuzz():
     global fuzz_count
     global modify_pe_file_path
     global va_list
+    global w_func_size
 
     fuzzing=True
     fuzz_count+=1
@@ -280,8 +281,20 @@ def fuzz():
     else:
         messagebox.showerror("错误", "提供的文件必须是PE文件或.text文件。")
         return
+    
+    # 设置函数大小约束
+    if not func_size_entry.get():
+        w_func_size = os.path.getsize(text_bin_path)
+        messagebox.showinfo("信息", f"未输入size,默认为选择的.text段大小 {w_func_size} bytes")
+    else:
+        w_func_size = int(func_size_entry.get())
+    
     if fuzz_count==0:
-        va_list=fuzz_run()
+        # 根据fuzz_all_var的值决定使用哪种fuzz方法
+        if fuzz_all_var.get():
+            va_list=fuzz_all()
+        else:
+            va_list=fuzz_run()
         print("fuzzing list -> "+str(va_list))
     if fuzz_count>=len(va_list):
         messagebox.showinfo("提示", "fuzz的函数列表已经用光,请手动启动新一轮fuzz")
@@ -313,6 +326,50 @@ def fuzz_run():
                     fuzz_patch.append(hex(function.offset))
     return fuzz_patch
 
+def fuzz_all():
+    print("fuzzing all functions...")
+    fuzz_patch=[]
+    disassembler = Disassembler()
+    report = disassembler.disassembleFile(modify_pe_file_path)
+    print(report)
+    functions = report.getFunctions()
+    #遍历所有函数，只检查大小条件
+    for function in functions:
+        # 使用 function.length 而不是 function.size
+        # SMDA 库中函数大小可能存储在 length 属性中
+        if hasattr(function, 'length'):
+            func_size = function.length
+        elif hasattr(function, 'size'):
+            func_size = function.size
+        else:
+            # 如果两个属性都不存在，尝试计算函数大小
+            # 通过查找函数的结束地址和开始地址之差
+            func_size = calculate_function_size(modify_pe_file_path, function.offset)
+            
+        if func_size >= w_func_size:
+            print(f"Adding function at {hex(function.offset)} with size {func_size}")
+            fuzz_patch.append(hex(function.offset))
+    return fuzz_patch
+
+def calculate_function_size(pe_path, func_addr):
+    # 这个函数类似于 filter_by_func_ret，但只返回函数大小
+    pe = pefile.PE(pe_path)
+    func_addr_rva = va_to_rva(pe, func_addr)
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    code_size = 0x4000  # 设置一个足够大的缓冲区来查找 ret 指令
+    code_rva = func_addr_rva
+    code_va = code_rva + pe.OPTIONAL_HEADER.ImageBase
+    code = pe.get_memory_mapped_image()[code_rva:code_rva + code_size]
+    code_asm = list(md.disasm(code, code_va))
+    
+    # 查找第一个 ret 指令
+    for insn in code_asm:
+        if insn.mnemonic == 'ret':
+            return insn.address - func_addr
+    
+    # 如果没有找到 ret 指令，返回一个默认值
+    return 0x100  # 默认函数大小
+
 # 创建主窗口
 root = tk.Tk()
 root.title("BinarySpy By 余吉")
@@ -341,6 +398,11 @@ text_bin_path_entry = tk.Entry(root, width=50)
 text_bin_path_entry.pack()
 text_bin_path_button = tk.Button(root, text="浏览", command=lambda: browse_file(text_bin_path_entry, "待patch的.text文件或PE文件", [("所有文件", "*.*")]))
 text_bin_path_button.pack()
+
+# 添加fuzz_all选项
+fuzz_all_var = tk.BooleanVar()
+fuzz_all_checkbox = tk.Checkbutton(root, text="Fuzz所有函数(不限于调用链)", variable=fuzz_all_var)
+fuzz_all_checkbox.pack()
 
 execute_button = tk.Button(root, text="执行", command=execute)
 fuzz_button = tk.Button(root, text="Fuzz", command=fuzz)
