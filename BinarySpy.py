@@ -17,6 +17,7 @@ import psutil
 import subprocess
 from datetime import datetime
 from queue import Queue
+from zeroeye_python import ZeroEyeWindow
 
 # --- 语言配置字典 ---
 LANG_CONFIG = {
@@ -281,9 +282,14 @@ class BinarySpy:
         self.stop_btn.config(state=tk.DISABLED)  # 初始禁用
         self.start_btn = ttk.Button(main_frame, text="", command=self.start_task)
         self.start_btn.pack(side=tk.RIGHT, pady=5)
+        self.zeroeye_btn = ttk.Button(main_frame, text="ZeroEye Tools", command=self.open_zeroeye)
+        self.zeroeye_btn.pack(side=tk.LEFT, pady=5)
 
         self.update_ui_text()
         self.on_mode_change()  # 初始化参数状态
+
+    def open_zeroeye(self):
+        ZeroEyeWindow(self.root)
 
     def on_mode_change(self):
         """根据模式和符号执行复选框状态切换启用/禁用参数"""
