@@ -14,6 +14,31 @@
 - **多语言支持** - 中文/英文界面
 - **缓存系统** - 加速重复分析
 
+## 扩展工具
+
+### ZeroEye
+
+ZeroEye 是一款自动化白加黑扫描工具，支持原生PE、.NET程序、内核驱动三种类型。
+
+**功能：**
+- **原生PE扫描**：扫描导入表，自动复制非系统DLL，生成代理DLL模板
+- **.NET扫描**：检测Config劫持/P/Invoke/Assembly侧加载向量
+- **内核驱动扫描**：扫描IOCTL + 危险API（自动跳过微软签名驱动）
+- **C++类重建**：从MSVC修饰名反向重建C++类结构，生成3种代理模板
+
+**使用：** 点击主窗口的 `ZeroEye` 按钮打开工具。
+
+### SigFlip
+
+SigFlip 是基于证书表填充技术的签名操作工具。
+
+**功能：**
+- **Bit Flip**：添加随机填充修改PE哈希，不破坏签名
+- **Inject**：在证书区域嵌入自定义数据（使用 `BinarySpy` 标签）
+- **Extract**：从修改后的PE文件提取嵌入数据
+
+**使用：** 点击主窗口的 `SigFlip` 按钮打开工具。
+
 ## 截图
 
 ![1775027002243](image/zh_README/1775027002243.png)
@@ -99,6 +124,9 @@ pip install pefile angr psutil ttkbootstrap
 
 - [原分析文章](https://www.52pojie.cn/thread-1900852-1-1.html)
 - [旧文章](old_README.md)
+- [Zeroeye](https://github.com/ImCoriander/ZeroEye)
+- [SigFlip](https://github.com/med0x2e/SigFlip)
+- [PECracker](https://github.com/berryalen02/PECracker)
 
 ## 免责声明
 

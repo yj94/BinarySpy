@@ -18,6 +18,31 @@
 - **Multi-language Support** - Chinese/English interface
 - **Cache System** - Speed up repeated analysis
 
+## Additional Tools
+
+### ZeroEye
+
+ZeroEye is an automated DLL hijacking scanner that supports native PE, .NET programs, and kernel drivers.
+
+**Features:**
+- **Native PE Scan**: Scan import table, auto-copy non-system DLLs, generate proxy DLL templates
+- **.NET Scan**: Detect Config hijack/P/Invoke/Assembly side-loading vectors
+- **Kernel Driver Scan**: Scan IOCTL + dangerous APIs (skip MS signed drivers)
+- **C++ Class Rebuild**: Rebuild C++ class from MSVC decorated names, generate 3 proxy templates
+
+**Usage:** Click `ZeroEye` button in the main window to open the tool.
+
+### SigFlip
+
+SigFlip is a signature manipulation tool using certificate table padding technique.
+
+**Features:**
+- **Bit Flip**: Add random padding to change PE hash without breaking signature
+- **Inject**: Embed custom data into certificate area with `BinarySpy` magic tag
+- **Extract**: Extract embedded data from modified PE files
+
+**Usage:** Click `SigFlip` button in the main window to open the tool.
+
 ## Screenshots
 
 ![1775027015297](image/README/1775027015297.png)
@@ -103,6 +128,9 @@ Entry Point → CRT → Main → Target Functions
 
 - [Original Analysis](https://www.52pojie.cn/thread-1900852-1-1.html)
 - [old_README](old_README.md)
+- [Zeroeye](https://github.com/ImCoriander/ZeroEye)
+- [SigFlip](https://github.com/med0x2e/SigFlip)
+- [PECracker](https://github.com/berryalen02/PECracker)
 
 ## Disclaimer
 
