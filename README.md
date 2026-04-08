@@ -25,6 +25,7 @@
 ZeroEye is an automated DLL hijacking scanner that supports native PE, .NET programs, and kernel drivers.
 
 **Features:**
+
 - **Native PE Scan**: Scan import table, auto-copy non-system DLLs, generate proxy DLL templates
 - **.NET Scan**: Detect Config hijack/P/Invoke/Assembly side-loading vectors
 - **Kernel Driver Scan**: Scan IOCTL + dangerous APIs (skip MS signed drivers)
@@ -37,6 +38,7 @@ ZeroEye is an automated DLL hijacking scanner that supports native PE, .NET prog
 SigFlip is a signature manipulation tool using certificate table padding technique.
 
 **Features:**
+
 - **Bit Flip**: Add random padding to change PE hash without breaking signature
 - **Inject**: Embed custom data into certificate area with `BinarySpy` magic tag
 - **Extract**: Extract embedded data from modified PE files
@@ -46,6 +48,10 @@ SigFlip is a signature manipulation tool using certificate table padding techniq
 ## Screenshots
 
 ![1775027015297](image/README/1775027015297.png)
+
+![1775641028493](image/README/1775641028493.png)
+
+![1775641034106](image/README/1775641034106.png)
 
 ## Quick Start
 
