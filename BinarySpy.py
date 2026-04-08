@@ -987,8 +987,9 @@ class BinarySpy:
                 addr = item['addr']
                 depth = item['depth']
                 name = item['name']
+                size = item['size']
 
-                self.log(f"[#{i+1}/{test_count}] depth={depth} | {hex(addr)}: {name}", detail_only=True)
+                self.log(f"[#{i+1}/{test_count}] depth={depth} | {hex(addr)}: {name} (size={size})", detail_only=True)
 
                 patched_file = self.apply_patch(target_path, addr, p_data, f"fuzz_{i}")
                 if not patched_file:
@@ -1025,8 +1026,8 @@ class BinarySpy:
                     time.sleep(delay)
                     if self.kill_calc_processes():
                         self.log("log_hit", hex(addr))
-                        hits.append((addr, name, depth))
-                        self.log(f"[!!!] 命中! 地址={hex(addr)}, 函数={name}, 深度={depth}", detail_only=True)
+                        hits.append((addr, name, depth, size))
+                        self.log(f"[!!!] 命中! 地址={hex(addr)}, 函数={name}, 大小={size}, 深度={depth}", detail_only=True)
                     else:
                         self.log("log_fail")
                         # 删除测试失败的 fuzz 文件（如果启用）
@@ -1059,8 +1060,8 @@ class BinarySpy:
             self.log(f"[*] 命中数量: {len(hits)}")
             if hits:
                 self.log("[+] 命中详情:")
-                for addr, name, depth in hits:
-                    self.log(f"    depth={depth} | {hex(addr)}: {name}")
+                for addr, name, depth, size in hits:
+                    self.log(f"    depth={depth}, size={size} | {hex(addr)}: {name}")
             self.log(f"[*] 主日志文件: {log_file}")
             self.log(f"[*] 详细日志文件: {detail_log_file}")
             self.log("=" * 60)
@@ -1192,8 +1193,9 @@ class BinarySpy:
 
                 addr = item['addr']
                 name = item['name']
+                size = item['size']
 
-                self.log(f"[#{i+1}/{test_count}] {hex(addr)}: {name}")
+                self.log(f"[#{i+1}/{test_count}] {hex(addr)}: {name} (size={size})")
 
                 patched_file = self.apply_patch(target_path, addr, p_data, f"fuzz_{i}")
                 if not patched_file:
@@ -1226,8 +1228,8 @@ class BinarySpy:
                     time.sleep(delay)
                     if self.kill_calc_processes():
                         self.log("log_hit", hex(addr))
-                        hits.append((addr, name))
-                        self.log(f"[!!!] 命中! 地址={hex(addr)}, 函数={name}", detail_only=True)
+                        hits.append((addr, name, size))
+                        self.log(f"[!!!] 命中! 地址={hex(addr)}, 函数={name}, 大小={size}", detail_only=True)
                     else:
                         self.log("log_fail")
                         if self.auto_delete_var.get():
@@ -1259,8 +1261,8 @@ class BinarySpy:
             self.log(f"[*] 命中数量: {len(hits)}")
             if hits:
                 self.log("[+] 命中详情:")
-                for addr, name in hits:
-                    self.log(f"    {hex(addr)}: {name}")
+                for addr, name, size in hits:
+                    self.log(f"    size={size} | {hex(addr)}: {name}")
             self.log(f"[*] 主日志文件: {log_file}")
             self.log("=" * 60)
 

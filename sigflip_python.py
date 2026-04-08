@@ -26,18 +26,57 @@ IMAGE_DIRECTORY_ENTRY_SECURITY = 4
 MAGIC_TAG = b"BinarySpy"
 
 
-def calculate_pe_checksum(data: bytearray, original_checksum: int = 0) -> int:
+def calculate_pe_checksum(data: bytearray, checksum_offset: int = None) -> int:
     """
-    Calculate PE checksum following Microsoft's algorithm.
-    The checksum is calculated over the entire file, treating it as an array
-    of 32-bit words, with the checksum field itself treated as 0.
+    Calculate PE checksum using pefile library.
+    The checksum field must be zeroed out before calculation.
     """
+    try:
+        # Make a copy to avoid modifying original
+        temp_data = bytearray(data)
+        
+        # Find checksum offset if not provided
+        if checksum_offset is None:
+            e_lfanew = struct.unpack('<I', temp_data[60:64])[0]
+            opt_offset = e_lfanew + 4 + 20
+            magic = struct.unpack('<H', temp_data[opt_offset:opt_offset+2])[0]
+            if magic == 0x10b:  # PE32
+                checksum_offset = opt_offset + 64
+            else:  # PE32+
+                checksum_offset = opt_offset + 88
+        
+        # Zero out checksum field for calculation
+        temp_data[checksum_offset:checksum_offset+4] = b'\x00\x00\x00\x00'
+        
+        pe = pefile.PE(data=bytes(temp_data), fast_load=True)
+        checksum = pe.generate_checksum()
+        pe.close()
+        return checksum
+    except Exception as e:
+        return _manual_pe_checksum(data, checksum_offset)
+
+
+def _manual_pe_checksum(data: bytearray, checksum_offset: int = None) -> int:
+    """Manual PE checksum calculation as fallback"""
+    if checksum_offset is None:
+        e_lfanew = struct.unpack('<I', data[60:64])[0]
+        opt_offset = e_lfanew + 4 + 20
+        magic = struct.unpack('<H', data[opt_offset:opt_offset+2])[0]
+        if magic == 0x10b:
+            checksum_offset = opt_offset + 64
+        else:
+            checksum_offset = opt_offset + 88
+    
+    # Make a copy with zeroed checksum
+    temp_data = bytearray(data)
+    temp_data[checksum_offset:checksum_offset+4] = b'\x00\x00\x00\x00'
+    
     checksum = 0
-    size = len(data)
+    size = len(temp_data)
     
     # Process in 32-bit words
     for i in range(0, size - 3, 4):
-        word = struct.unpack('<I', data[i:i+4])[0]
+        word = struct.unpack('<I', temp_data[i:i+4])[0]
         checksum = (checksum + word) & 0xFFFFFFFF
         checksum = ((checksum & 0xFFFF) + (checksum >> 16)) & 0xFFFFFFFF
     
@@ -174,6 +213,11 @@ class SigFlipAnalyzer:
         """
         Bit flip mode: Add random padding to certificate table.
         Changes PE hash without breaking signature.
+        
+        Key logic from PECracker.go:
+        1. Write data at cert_offset + cert_size (certificate table end)
+        2. Only update Security Directory Size (NOT dwLength)
+        3. Do NOT update PE checksum
         """
         try:
             # Check system config
@@ -191,8 +235,10 @@ class SigFlipAnalyzer:
             with open(pe_path, 'rb') as f:
                 pe_data = bytearray(f.read())
             
+            original_file_size = len(pe_data)
             original_hash = self.calculate_sha256(bytes(pe_data))
             self.log(f"[+] Original SHA256: {original_hash}")
+            self.log(f"[*] Original file size: {original_file_size} bytes")
             
             # Get PE offsets
             offsets = self._get_pe_offsets(pe_data)
@@ -204,42 +250,26 @@ class SigFlipAnalyzer:
             
             self.log(f"[*] Certificate table: offset=0x{cert_rva:X}, size={cert_size} bytes")
             
-            # WIN_CERTIFICATE structure:
-            # dwLength (4 bytes) - length of certificate
-            # wRevision (2 bytes) - should be 0x0200
-            # wCertificateType (2 bytes) - WIN_CERT_TYPE_PKCS_SIGNED_DATA = 0x0002
-            # bCertificate (variable) - the actual PKCS#7 SignedData
-            
-            dw_length = struct.unpack('<I', pe_data[cert_rva:cert_rva+4])[0]
-            self.log(f"[*] WIN_CERTIFICATE dwLength: {dw_length} bytes")
+            # PECracker.go style: write at cert_offset + cert_size
+            cert_end = cert_rva + cert_size
+            self.log(f"[*] Write position (cert_end): 0x{cert_end:X}")
             
             # Generate random padding
             padding = os.urandom(padding_size)
             self.log(f"[*] Adding {padding_size} bytes of random padding")
             
-            # Insert padding right after the certificate data (at cert_rva + dw_length)
-            insert_offset = cert_rva + dw_length
-            pe_data[insert_offset:insert_offset] = padding
+            # Expand buffer and append padding at the end
+            new_file_size = original_file_size + padding_size
+            pe_data.extend(padding)
             
-            # Update WIN_CERTIFICATE dwLength (add padding size)
-            new_dw_length = dw_length + padding_size
-            pe_data[cert_rva:cert_rva+4] = struct.pack('<I', new_dw_length)
-            self.log(f"[*] Updated dwLength: {new_dw_length} bytes")
+            self.log(f"[*] New file size: {new_file_size} bytes")
             
-            # Update Security Directory size (add padding size)
-            old_cert_size = struct.unpack('<I', pe_data[offsets['sec_dir_offset']+4:offsets['sec_dir_offset']+8])[0]
-            new_cert_size = old_cert_size + padding_size
+            # KEY: Only update Security Directory Size (NOT dwLength, NOT checksum)
+            # This matches PECracker.go behavior
+            new_cert_size = cert_size + padding_size
             pe_data[offsets['sec_dir_offset']+4:offsets['sec_dir_offset']+8] = struct.pack('<I', new_cert_size)
             self.log(f"[*] Updated Security Directory size: {new_cert_size} bytes")
-            
-            # Update checksum
-            # First zero out the current checksum
-            pe_data[offsets['checksum_offset']:offsets['checksum_offset']+4] = b'\x00\x00\x00\x00'
-            
-            # Calculate new checksum
-            new_checksum = calculate_pe_checksum(pe_data)
-            pe_data[offsets['checksum_offset']:offsets['checksum_offset']+4] = struct.pack('<I', new_checksum)
-            self.log(f"[*] Updated Checksum: 0x{new_checksum:08X}")
+            self.log(f"[*] NOT updating dwLength or checksum (PECracker.go style)")
             
             # Calculate new hash
             new_hash = self.calculate_sha256(bytes(pe_data))
@@ -281,6 +311,11 @@ class SigFlipAnalyzer:
         """
         Inject raw data into certificate table.
         Format: MAGIC_TAG + 4-byte size (little-endian) + raw_data + padding
+        
+        Key logic from PECracker.go:
+        1. Write data at cert_offset + cert_size (certificate table end)
+        2. Only update Security Directory Size (NOT dwLength)
+        3. Do NOT update PE checksum
         """
         try:
             # Check system config
@@ -310,14 +345,17 @@ class SigFlipAnalyzer:
             if padding_size:
                 payload += b'\x00' * padding_size
             
-            self.log(f"[*] Total payload size: {len(payload)} bytes (with {padding_size} bytes alignment padding)")
+            total_payload_size = len(payload)
+            self.log(f"[*] Total payload size: {total_payload_size} bytes (with {padding_size} bytes alignment padding)")
             
             # Read entire PE file
             with open(pe_path, 'rb') as f:
                 pe_data = bytearray(f.read())
             
+            original_file_size = len(pe_data)
             original_hash = self.calculate_sha256(bytes(pe_data))
             self.log(f"[+] Original SHA256: {original_hash}")
+            self.log(f"[*] Original file size: {original_file_size} bytes")
             
             # Get PE offsets
             offsets = self._get_pe_offsets(pe_data)
@@ -329,30 +367,22 @@ class SigFlipAnalyzer:
             
             self.log(f"[*] Certificate table: offset=0x{cert_rva:X}, size={cert_size} bytes")
             
-            # WIN_CERTIFICATE dwLength
-            dw_length = struct.unpack('<I', pe_data[cert_rva:cert_rva+4])[0]
-            self.log(f"[*] WIN_CERTIFICATE dwLength: {dw_length} bytes")
+            # PECracker.go style: write at cert_offset + cert_size
+            cert_end = cert_rva + cert_size
+            self.log(f"[*] Write position (cert_end): 0x{cert_end:X}")
             
-            # Insert payload after certificate data
-            insert_offset = cert_rva + dw_length
-            pe_data[insert_offset:insert_offset] = payload
+            # Expand buffer and append payload at end
+            new_file_size = original_file_size + total_payload_size
+            pe_data.extend(payload)
             
-            # Update dwLength
-            new_dw_length = dw_length + len(payload)
-            pe_data[cert_rva:cert_rva+4] = struct.pack('<I', new_dw_length)
-            self.log(f"[*] Updated dwLength: {new_dw_length} bytes")
+            self.log(f"[*] New file size: {new_file_size} bytes")
             
-            # Update Security Directory size
-            old_cert_size = struct.unpack('<I', pe_data[offsets['sec_dir_offset']+4:offsets['sec_dir_offset']+8])[0]
-            new_cert_size = old_cert_size + len(payload)
+            # KEY: Only update Security Directory Size (NOT dwLength, NOT checksum)
+            # This matches PECracker.go behavior
+            new_cert_size = cert_size + total_payload_size
             pe_data[offsets['sec_dir_offset']+4:offsets['sec_dir_offset']+8] = struct.pack('<I', new_cert_size)
             self.log(f"[*] Updated Security Directory size: {new_cert_size} bytes")
-            
-            # Update checksum
-            pe_data[offsets['checksum_offset']:offsets['checksum_offset']+4] = b'\x00\x00\x00\x00'
-            new_checksum = calculate_pe_checksum(pe_data)
-            pe_data[offsets['checksum_offset']:offsets['checksum_offset']+4] = struct.pack('<I', new_checksum)
-            self.log(f"[*] Updated Checksum: 0x{new_checksum:08X}")
+            self.log(f"[*] NOT updating dwLength or checksum (PECracker.go style)")
             
             # Calculate new hash
             new_hash = self.calculate_sha256(bytes(pe_data))
