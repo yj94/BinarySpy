@@ -575,6 +575,36 @@ class ZeroEyeAnalyzer:
         )
         return outputs
 
+    def generate_from_results(self, results: list[AnalysisResult], output_root: str | Path, should_stop: Optional[Callable[[], bool]] = None) -> list[Path]:
+        """从预收集的分析结果生成 bundle 文件"""
+        output_root = Path(output_root)
+        outputs = []
+        for result in results:
+            if should_stop and should_stop():
+                self.log("Generation stopped by user.")
+                break
+            if result.is_driver:
+                outputs.append(self._generate_driver_bundle(result, output_root))
+            elif result.is_dotnet:
+                outputs.append(self._generate_dotnet_bundle(result, output_root))
+            else:
+                outputs.append(self._generate_native_bundle(result, output_root))
+        
+        # 写入 manifest
+        self._write_scan_manifest(
+            output_root=output_root,
+            root_dir=results[0].path.parent if results else Path("."),
+            scan_types="from_results",
+            signed_only=False,
+            arch_filter="all",
+            exclude_patterns="",
+            exclude_system_only=False,
+            import_dll_count_filter="",
+            matched_results=results[:len(outputs)],  # 只包含已处理的
+            output_dirs=outputs,
+        )
+        return outputs
+
     def _write_scan_manifest(
         self,
         output_root: Path,
@@ -1040,21 +1070,22 @@ class ZeroEyeWindow:
         self.option_group.pack(fill=tk.X, pady=6)
         self.types_lbl = ttk.Label(self.option_group, text="")
         self.types_lbl.grid(row=0, column=0, sticky=tk.W)
-        ttk.Entry(self.option_group, textvariable=self.scan_types, width=18).grid(row=0, column=1, padx=6, pady=4, sticky=tk.W)
+        ttk.Entry(self.option_group, textvariable=self.scan_types, width=10).grid(row=0, column=1, padx=3, pady=4, sticky=tk.W)
+        ttk.Label(self.option_group, text="(all/exe/gui/cmd/dotnet/sys)", foreground="gray").grid(row=0, column=2, columnspan=2, sticky=tk.W)
         self.arch_lbl = ttk.Label(self.option_group, text="")
-        self.arch_lbl.grid(row=0, column=2, sticky=tk.W)
-        ttk.Combobox(self.option_group, textvariable=self.arch_filter, values=["all", "x64", "x86"], width=10, state="readonly").grid(row=0, column=3, padx=6, pady=4, sticky=tk.W)
+        self.arch_lbl.grid(row=0, column=4, sticky=tk.W)
+        ttk.Combobox(self.option_group, textvariable=self.arch_filter, values=["all", "x64", "x86"], width=10, state="readonly").grid(row=0, column=5, padx=6, pady=4, sticky=tk.W)
         self.exclude_dll_lbl = ttk.Label(self.option_group, text="")
-        self.exclude_dll_lbl.grid(row=0, column=4, sticky=tk.W)
-        ttk.Entry(self.option_group, textvariable=self.exclude_patterns, width=18).grid(row=0, column=5, padx=6, pady=4, sticky=tk.W)
+        self.exclude_dll_lbl.grid(row=0, column=6, sticky=tk.W)
+        ttk.Entry(self.option_group, textvariable=self.exclude_patterns, width=18).grid(row=0, column=7, padx=6, pady=4, sticky=tk.W)
         self.import_dll_count_lbl = ttk.Label(self.option_group, text="")
         self.import_dll_count_lbl.grid(row=1, column=0, sticky=tk.W)
         self.import_dll_count_entry = ttk.Entry(self.option_group, textvariable=self.import_dll_count_filter, width=18)
         self.import_dll_count_entry.grid(row=1, column=1, padx=6, pady=4, sticky=tk.W)
         self.signed_only_cb = ttk.Checkbutton(self.option_group, text="", variable=self.signed_only)
-        self.signed_only_cb.grid(row=1, column=2, columnspan=2, sticky=tk.W)
+        self.signed_only_cb.grid(row=1, column=4, columnspan=2, sticky=tk.W)
         self.exclude_system_cb = ttk.Checkbutton(self.option_group, text="", variable=self.exclude_system_only)
-        self.exclude_system_cb.grid(row=1, column=4, columnspan=2, sticky=tk.W)
+        self.exclude_system_cb.grid(row=1, column=6, columnspan=2, sticky=tk.W)
 
         action_group = ttk.Frame(main)
         action_group.pack(fill=tk.X, pady=6)
@@ -1128,7 +1159,9 @@ class ZeroEyeWindow:
         self.clear_btn.config(text=self._tr("clear_log"))
 
     def _append_log(self, message: str):
+        # 直接更新 UI，确保实时输出
         self.window.after(0, lambda: self._append_log_ui(message))
+        self.window.update_idletasks()  # 强制刷新 UI
 
     def _append_log_ui(self, message: str):
         self.log_text.insert(tk.END, message + "\n")
@@ -1190,24 +1223,37 @@ class ZeroEyeWindow:
         self._append_log("")
 
     def _scan_directory(self):
+        """重构：与原项目一致，只扫描 EXE 和驱动文件"""
         root = self.scan_dir.get().strip()
         if not root:
             raise ValueError(self._tr("need_scan_dir"))
+        
         self.scan_stop_requested = False
         self.scan_running = True
-        self.window.after(0, lambda: self._set_scan_results([]))
         self.window.after(0, lambda: self.stop_scan_btn.config(state=tk.NORMAL))
         self._append_log(self._tr("scan_started").format(root))
+        
+        outputs = []
+        preview_rows = []
+        matched_results = []
+        
         try:
-            preview_rows = []
             types = normalize_scan_types(self.scan_types.get())
             patterns = [p.strip().lower() for p in self.exclude_patterns.get().split("|") if p.strip()]
             scan_root = Path(root)
+            output_root = Path(self.output_root.get())
+            
+            # 单阶段扫描：只扫描 EXE 和 SYS（与原项目一致）
             for path in scan_root.rglob("*"):
                 if self.scan_stop_requested:
+                    self._append_log(self._tr("scan_stopping"))
                     break
-                if not path.is_file() or path.suffix.lower() not in {".exe", ".dll", ".sys"}:
+                
+                # 原项目只扫描 .exe 和 .sys，不单独扫描 .dll
+                ext = path.suffix.lower()
+                if not path.is_file() or ext not in {".exe", ".sys"}:
                     continue
+                
                 result = self.analyzer.analyze_file(path)
                 if not result.valid_pe:
                     continue
@@ -1225,27 +1271,69 @@ class ZeroEyeWindow:
                     continue
                 if self.exclude_system_only.get() and result.file_kind in {"gui", "cmd", "exe"} and self.analyzer._only_system_imports(result):
                     continue
+                
+                # 检查是否有可劫持向量
+                if result.is_driver:
+                    # 驱动：检查危险 API
+                    if not result.risky_driver_imports:
+                        continue
+                elif result.is_dotnet:
+                    # .NET：检查 P/Invoke 或 AssemblyRef
+                    dotnet = result.dotnet
+                    if not dotnet.pinvoke_targets and not dotnet.assembly_refs and not dotnet.config_can_create:
+                        continue
+                else:
+                    # 原生 PE：检查是否有可劫持 DLL
+                    hijack_dlls = self.analyzer._candidate_hijack_dlls(result.imports)
+                    if not hijack_dlls:
+                        continue
+                
+                # 实时添加到预览列表
                 preview_rows.append((self._format_result_row(result), str(path)))
+                matched_results.append(result)
+                
+                # 实时生成 bundle 文件
+                try:
+                    if result.is_driver:
+                        bundle = self.analyzer._generate_driver_bundle(result, output_root)
+                    elif result.is_dotnet:
+                        bundle = self.analyzer._generate_dotnet_bundle(result, output_root)
+                    else:
+                        bundle = self.analyzer._generate_native_bundle(result, output_root)
+                    outputs.append(bundle)
+                    self._append_log(f"[+] {path.name} -> {bundle.name}")
+                except Exception as e:
+                    self._append_log(f"[!] {path.name}: {e}")
+                
+                # 更新预览列表（每 10 个更新一次）
+                if len(preview_rows) % 10 == 0:
+                    self.window.after(0, lambda rows=list(preview_rows): self._set_scan_results(rows))
+            
+            # 最终更新预览列表
             self.window.after(0, lambda rows=preview_rows: self._set_scan_results(rows))
-            self._append_log(self._tr("scan_preview_done").format(len(preview_rows)))
-
-            outputs = self.analyzer.scan_directory(
-                root_dir=root,
-                output_root=self.output_root.get(),
-                scan_types=self.scan_types.get(),
-                signed_only=self.signed_only.get(),
-                arch_filter=self.arch_filter.get(),
-                exclude_patterns=self.exclude_patterns.get(),
-                exclude_system_only=self.exclude_system_only.get(),
-                import_dll_count_filter=self.import_dll_count_filter.get(),
-                should_stop=lambda: self.scan_stop_requested,
-            )
+            
+            # 写入 manifest
+            if matched_results:
+                self.analyzer._write_scan_manifest(
+                    output_root=output_root,
+                    root_dir=scan_root,
+                    scan_types=self.scan_types.get(),
+                    signed_only=self.signed_only.get(),
+                    arch_filter=self.arch_filter.get(),
+                    exclude_patterns=self.exclude_patterns.get(),
+                    exclude_system_only=self.exclude_system_only.get(),
+                    import_dll_count_filter=self.import_dll_count_filter.get(),
+                    matched_results=matched_results,
+                    output_dirs=outputs,
+                )
+            
+            # 总结
             if self.scan_stop_requested:
                 self._append_log(self._tr("scan_stopped"))
+            self._append_log(self._tr("scan_preview_done").format(len(preview_rows)))
             self._append_log(self._tr("generated_count").format(len(outputs)))
-            for item in outputs:
-                self._append_log(str(item))
             self._append_log("")
+            
         finally:
             self.scan_running = False
             self.scan_stop_requested = False

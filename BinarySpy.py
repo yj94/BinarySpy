@@ -28,7 +28,7 @@ LANG_CONFIG = {
         "target_label": "目标 PE:",
         "patch_label": "补丁源:",
         "loader_label": "加载器 EXE:",
-        "loader_hint": "(DLL 目标需要选择 EXE 来加载测试)",
+        "loader_hint": "(DLL 需要 EXE 加载)",
         "remove_sig_btn": "去除签名",
         "opt_group": "Fuzz & 自动化设置",
         "test_patch_cb": "使用内置测试补丁 (calc32/64.bin)",
@@ -61,7 +61,7 @@ LANG_CONFIG = {
         "log_hit": " [!!!] 命中成功! 地址 {} 触发了目标进程",
         "log_fail": " [.] 未触发",
         "dll_mode": "[*] 检测到 DLL 目标，使用加载器 EXE 测试模式",
-        "need_loader": "DLL 目标需要选择加载器 EXE 文件"
+        "need_loader": "DLL 需要选择加载器 EXE"
     },
     "en": {
         "title": "BinarySpy",
@@ -69,7 +69,7 @@ LANG_CONFIG = {
         "target_label": "Target PE:",
         "patch_label": "Patch Source:",
         "loader_label": "Loader EXE:",
-        "loader_hint": "(DLL target requires EXE to load and test)",
+        "loader_hint": "(DLL needs EXE loader)",
         "remove_sig_btn": "Remove Signature",
         "opt_group": "Fuzz & Automation Settings",
         "test_patch_cb": "Use Internal Test Patch (calc32/64.bin)",
@@ -102,7 +102,7 @@ LANG_CONFIG = {
         "log_hit": " [!!!] HIT SUCCESS! Addr {} triggered target process",
         "log_fail": " [.] No Trigger",
         "dll_mode": "[*] DLL target detected, using loader EXE test mode",
-        "need_loader": "DLL target requires a loader EXE file"
+        "need_loader": "DLL requires a loader EXE"
     }
 }
 
@@ -393,6 +393,131 @@ class BinarySpy:
         self.stop_requested = True
         self.log("[*] 正在停止符号执行...")
 
+    def _test_manual_va(self, target_path, patch_path, manual_va):
+        """手动 VA 模式：直接对指定 VA 进行补丁
+        DLL 模式：只生成文件，不运行测试
+        EXE 模式：生成文件并运行测试
+        """
+        loader_path = self.loader_entry.get().strip()
+        l = LANG_CONFIG[self.current_lang]
+        
+        try:
+            # 解析 VA
+            try:
+                va = int(manual_va, 16)
+            except ValueError:
+                messagebox.showerror(l["msg_error"], 
+                    "无效的 VA 地址，请输入十六进制格式" if self.current_lang == "zh" else "Invalid VA address, please use hex format")
+                return
+            
+            # 初始化日志
+            log_file, detail_log_file = self.setup_logging(target_path)
+            
+            self.log("=" * 60)
+            self.log(f"[*] 手动 VA 补丁模式")
+            self.log(f"[*] 目标文件: {target_path}")
+            self.log(f"[*] 补丁 VA: {hex(va)}")
+            
+            if self.is_dll_target:
+                self.log(f"[*] DLL 模式：仅生成补丁文件，不运行测试")
+                if loader_path:
+                    self.log(f"[*] 加载器: {loader_path}")
+            
+            self.log("=" * 60)
+            
+            # 加载 PE 获取架构信息
+            proj = angr.Project(target_path, auto_load_libs=False)
+            self.log(f"[+] PE 架构: {proj.arch.name}, 位宽: {proj.arch.bits}")
+            
+            # 获取补丁数据
+            if self.test_patched_var.get():
+                p_file = "calc64.bin" if proj.arch.bits == 64 else "calc32.bin"
+                if not os.path.exists(p_file):
+                    raise Exception(f"Missing {p_file}")
+                with open(p_file, 'rb') as f:
+                    p_data = f.read()
+                self.log(f"[+] 使用内置测试补丁: {p_file}, 大小={len(p_data)} bytes")
+            elif patch_path:
+                p_data = self.get_patch_data(patch_path)
+                self.log(f"[+] 补丁数据来源: {patch_path}, 大小={len(p_data)} bytes")
+            else:
+                messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
+                    "请选择补丁源文件或勾选使用内置测试补丁" if self.current_lang == "zh" else "Please select a patch source or enable test patch")
+                return
+            
+            # 应用补丁
+            patched_file = self.apply_patch(target_path, va, p_data, "manual")
+            if not patched_file:
+                self.log(f"[!] 补丁失败!")
+                return
+            
+            self.log(f"[+] 补丁文件已生成: {patched_file}")
+            
+            # DLL 模式：只生成文件，不运行测试
+            if self.is_dll_target:
+                test_dir = os.path.dirname(patched_file)
+                
+                # 如果有 loader，也复制到测试目录
+                if loader_path:
+                    loader_name = os.path.basename(loader_path)
+                    test_loader = os.path.join(test_dir, loader_name)
+                    shutil.copy2(loader_path, test_loader)
+                    self.log(f"[+] 加载器已复制: {test_loader}")
+                
+                self.log("=" * 60)
+                self.log(f"[+] DLL 补丁完成!")
+                self.log(f"[+] 补丁文件: {patched_file}")
+                if loader_path:
+                    self.log(f"[+] 加载器: {test_loader}")
+                self.log(f"[*] 请手动运行加载器测试")
+                self.log("=" * 60)
+                
+                messagebox.showinfo(l["msg_success"],
+                    f"补丁文件已生成:\n{patched_file}\n\n请手动运行加载器测试" if self.current_lang == "zh" else f"Patched file generated:\n{patched_file}\n\nRun loader manually to test")
+                return
+            
+            # EXE 模式：运行测试
+            self.log(f"[*] 开始运行测试...")
+            self.kill_calc_processes()
+            
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+            p = subprocess.Popen(patched_file, shell=True, startupinfo=startupinfo,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            delay = float(self.delay_entry.get().strip() or "3.5")
+            time.sleep(delay)
+            
+            if self.kill_calc_processes():
+                self.log(f"[!!!] 命中成功! VA {hex(va)} 触发了目标进程")
+                self.log(f"[+] 测试成功!")
+            else:
+                self.log(f"[.] 未触发目标进程")
+                if self.auto_delete_var.get():
+                    try:
+                        if self.is_dll_target and os.path.exists(os.path.dirname(patched_file)):
+                            shutil.rmtree(os.path.dirname(patched_file))
+                            self.log(f"[-] 已删除测试目录")
+                        elif os.path.exists(patched_file):
+                            os.remove(patched_file)
+                            self.log(f"[-] 已删除补丁文件")
+                    except: pass
+            
+            p.terminate()
+            
+            self.log("=" * 60)
+            self.log(f"[*] 测试完成")
+            self.log(f"[*] 日志文件: {log_file}")
+            
+        except Exception as e:
+            self.log(f"[X] Error: {str(e)}")
+        finally:
+            self.progress.stop()
+            self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+
     def load_target(self):
         p = filedialog.askopenfilename(filetypes=[("PE files", "*.exe *.dll *.sys"), ("All files", "*.*")])
         if not p:
@@ -410,12 +535,19 @@ class BinarySpy:
             
             if is_dll:
                 self.loader_frame.grid()
-                self.log(f"[*] 检测到 DLL 目标，请选择加载器 EXE")
+                self.log(f"[*] 检测到 DLL 目标，使用全部 Fuzz 模式")
+                # DLL 目标：强制使用全部 Fuzz 模式，禁用自动分析
+                self.mode_var.set("all")
+                self.rb_auto.config(state=tk.DISABLED)
+                self.on_mode_change()
             else:
                 self.loader_frame.grid_remove()
+                # EXE 目标：恢复自动分析模式
+                self.rb_auto.config(state=tk.NORMAL)
         except:
             self.is_dll_target = False
             self.loader_frame.grid_remove()
+            self.rb_auto.config(state=tk.NORMAL)
     
     def load_patch(self):
         p = filedialog.askopenfilename(); self.patch_entry.delete(0, tk.END); self.patch_entry.insert(0, p)
@@ -770,12 +902,18 @@ class BinarySpy:
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
             return
 
-        # DLL 模式需要 loader exe
+        # DLL 模式需要 loader exe（除非填写了手动 VA）
         l = LANG_CONFIG[self.current_lang]
-        if self.is_dll_target and not loader_path:
+        manual_va = self.va_entry.get().strip()
+        if self.is_dll_target and not loader_path and not manual_va:
             messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
                                    l["need_loader"])
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+            return
+
+        # 手动 VA 模式：直接测试指定地址
+        if manual_va:
+            self._test_manual_va(target_path, patch_path, manual_va)
             return
 
         if not self.test_patched_var.get() and not patch_path:
@@ -1086,12 +1224,18 @@ class BinarySpy:
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
             return
         
-        # DLL 模式需要 loader exe
+        # DLL 模式需要 loader exe（除非填写了手动 VA）
         l = LANG_CONFIG[self.current_lang]
-        if self.is_dll_target and not loader_path:
+        manual_va = self.va_entry.get().strip()
+        if self.is_dll_target and not loader_path and not manual_va:
             messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
                                    l["need_loader"])
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+            return
+
+        # 手动 VA 模式：直接测试指定地址
+        if manual_va:
+            self._test_manual_va(target_path, patch_path, manual_va)
             return
 
         log_file = None
@@ -1129,10 +1273,15 @@ class BinarySpy:
                 self.log(f"[+] 补丁数据来源: {patch_path}, 大小={len(p_data)} bytes", detail_only=True)
 
             patch_size = len(p_data)
+            
+            # 用户定义的最小函数大小优先，否则使用补丁大小
+            min_sz_input = self.size_entry.get().strip()
+            min_sz = int(min_sz_input) if min_sz_input else patch_size
+            self.log(f"[*] 最小函数大小过滤: {min_sz} bytes")
 
             # 缓存路径
             f_hash = self.get_file_hash(target_path)
-            fuzz_cache_path = os.path.join(self.cache_dir, f"{f_hash}_fuzz_s{patch_size}.cache")
+            fuzz_cache_path = os.path.join(self.cache_dir, f"{f_hash}_fuzz_s{min_sz}.cache")
 
             # 检查缓存
             if os.path.exists(fuzz_cache_path):
@@ -1146,7 +1295,7 @@ class BinarySpy:
                 cfg = proj.analyses.CFGFast()
                 all_functions = {}
                 for func in cfg.functions.values():
-                    if func.size and func.size >= patch_size:
+                    if func.size and func.size >= min_sz:  # 使用用户定义的最小函数大小
                         all_functions[func.addr] = {
                             'addr': func.addr,
                             'name': func.name,
@@ -1155,6 +1304,52 @@ class BinarySpy:
 
                 targets = list(all_functions.values())
                 targets.sort(key=lambda x: x['size'])  # 按大小排序
+
+                # DLL 目标：优先导出函数，然后是导出函数调用的内部函数
+                if self.is_dll_target:
+                    try:
+                        pe = pefile.PE(target_path)
+                        export_addrs = set()
+                        export_names = {}
+                        if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
+                            for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+                                if exp.address:
+                                    # 导出地址是 RVA，需要转换为 VA
+                                    export_va = exp.address + pe.OPTIONAL_HEADER.ImageBase
+                                    export_addrs.add(export_va)
+                                    name = exp.name.decode() if exp.name else f"ordinal_{exp.ordinal}"
+                                    export_names[export_va] = name
+                        pe.close()
+                        
+                        if export_addrs:
+                            # 分析导出函数的调用链
+                            self.log("[*] 分析导出函数调用链...", detail_only=True)
+                            called_funcs = set()
+                            
+                            # 遍历 CFG 找出导出函数调用的内部函数
+                            for node in cfg.graph.nodes():
+                                func_addr = getattr(node, 'function_address', None)
+                                if func_addr and func_addr in export_addrs:
+                                    # 这是导出函数的节点，找出它调用的函数
+                                    for src, dst in cfg.graph.out_edges(node):
+                                        dst_func = getattr(dst, 'function_address', None)
+                                        if dst_func and dst_func not in export_addrs and dst_func in all_functions:
+                                            called_funcs.add(dst_func)
+                            
+                            # 三级排序：导出函数 → 导出函数调用的函数 → 其他函数
+                            export_funcs = [f for f in targets if f['addr'] in export_addrs]
+                            called_targets = [f for f in targets if f['addr'] in called_funcs]
+                            other_funcs = [f for f in targets if f['addr'] not in export_addrs and f['addr'] not in called_funcs]
+                            
+                            targets = export_funcs + called_targets + other_funcs
+                            
+                            self.log(f"[+] 导出函数: {len(export_funcs)} 个 (优先测试)")
+                            self.log(f"[+] 导出函数调用的内部函数: {len(called_targets)} 个 (次优先)")
+                            self.log(f"[+] 其他函数: {len(other_funcs)} 个", detail_only=True)
+                        else:
+                            self.log("[!] 未找到导出函数", detail_only=True)
+                    except Exception as e:
+                        self.log(f"[!] 分析导出函数失败: {e}", detail_only=True)
 
                 # 保存缓存
                 with open(fuzz_cache_path, 'wb') as f:
