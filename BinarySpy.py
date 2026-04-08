@@ -18,6 +18,7 @@ import subprocess
 from datetime import datetime
 from queue import Queue
 from zeroeye_python import ZeroEyeWindow
+from sigflip_python import SigFlipWindow
 
 # --- 语言配置字典 ---
 LANG_CONFIG = {
@@ -26,6 +27,8 @@ LANG_CONFIG = {
         "path_group": "文件配置",
         "target_label": "目标 PE:",
         "patch_label": "补丁源:",
+        "loader_label": "加载器 EXE:",
+        "loader_hint": "(DLL 目标需要选择 EXE 来加载测试)",
         "remove_sig_btn": "去除签名",
         "opt_group": "Fuzz & 自动化设置",
         "test_patch_cb": "使用内置测试补丁 (calc32/64.bin)",
@@ -56,13 +59,17 @@ LANG_CONFIG = {
         "log_auto_steps": "[+] 自动设置符号执行步数: {}",
         "log_fuzz_start": "[+] 发现 {} 个可达函数，开始 Fuzz 测试...",
         "log_hit": " [!!!] 命中成功! 地址 {} 触发了目标进程",
-        "log_fail": " [.] 未触发"
+        "log_fail": " [.] 未触发",
+        "dll_mode": "[*] 检测到 DLL 目标，使用加载器 EXE 测试模式",
+        "need_loader": "DLL 目标需要选择加载器 EXE 文件"
     },
     "en": {
         "title": "BinarySpy",
         "path_group": "Path Configuration",
         "target_label": "Target PE:",
         "patch_label": "Patch Source:",
+        "loader_label": "Loader EXE:",
+        "loader_hint": "(DLL target requires EXE to load and test)",
         "remove_sig_btn": "Remove Signature",
         "opt_group": "Fuzz & Automation Settings",
         "test_patch_cb": "Use Internal Test Patch (calc32/64.bin)",
@@ -93,7 +100,9 @@ LANG_CONFIG = {
         "log_auto_steps": "[+] Auto set symbolic execution steps: {}",
         "log_fuzz_start": "[+] Found {} reachable functions, starting Fuzz...",
         "log_hit": " [!!!] HIT SUCCESS! Addr {} triggered target process",
-        "log_fail": " [.] No Trigger"
+        "log_fail": " [.] No Trigger",
+        "dll_mode": "[*] DLL target detected, using loader EXE test mode",
+        "need_loader": "DLL target requires a loader EXE file"
     }
 }
 
@@ -139,6 +148,8 @@ class BinarySpy:
         self.path_group.config(text=l["path_group"])
         self.target_lbl.config(text=l["target_label"])
         self.patch_lbl.config(text=l["patch_label"])
+        self.loader_lbl.config(text=l["loader_label"])
+        self.loader_hint_lbl.config(text=l["loader_hint"])
         self.opt_group.config(text=l["opt_group"])
         # 模式选择
         self.mode_lbl.config(text=l["mode_label"])
@@ -205,6 +216,24 @@ class BinarySpy:
         self.patch_entry.grid(row=1, column=1, padx=5, pady=2)
         btn2 = ttk.Button(self.path_group, text="", command=self.load_patch)
         btn2.grid(row=1, column=2); self.browse_btns.append(btn2)
+
+        # DLL 加载器 EXE 选择（初始隐藏）
+        self.loader_frame = ttk.Frame(self.path_group)
+        self.loader_frame.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=2)
+        self.loader_lbl = ttk.Label(self.loader_frame, text="")
+        self.loader_lbl.pack(side=tk.LEFT)
+        self.loader_entry = ttk.Entry(self.loader_frame, width=47)
+        self.loader_entry.pack(side=tk.LEFT, padx=5)
+        btn3 = ttk.Button(self.loader_frame, text="", command=self.load_loader)
+        btn3.pack(side=tk.LEFT); self.browse_btns.append(btn3)
+        self.loader_hint_lbl = ttk.Label(self.loader_frame, text="", foreground="orange")
+        self.loader_hint_lbl.pack(side=tk.LEFT, padx=5)
+        
+        # 初始隐藏 loader 选择框
+        self.loader_frame.grid_remove()
+        
+        # DLL 目标标志
+        self.is_dll_target = False
 
         # --- 自动化选项 ---
         self.opt_group = ttk.LabelFrame(main_frame, text="", padding="10")
@@ -284,12 +313,17 @@ class BinarySpy:
         self.start_btn.pack(side=tk.RIGHT, pady=5)
         self.zeroeye_btn = ttk.Button(main_frame, text="ZeroEye Tools", command=self.open_zeroeye)
         self.zeroeye_btn.pack(side=tk.LEFT, pady=5)
+        self.sigflip_btn = ttk.Button(main_frame, text="SigFlip Tools", command=self.open_sigflip)
+        self.sigflip_btn.pack(side=tk.LEFT, pady=5, padx=5)
 
         self.update_ui_text()
         self.on_mode_change()  # 初始化参数状态
 
     def open_zeroeye(self):
         ZeroEyeWindow(self.root)
+
+    def open_sigflip(self):
+        SigFlipWindow(self.root)
 
     def on_mode_change(self):
         """根据模式和符号执行复选框状态切换启用/禁用参数"""
@@ -360,9 +394,37 @@ class BinarySpy:
         self.log("[*] 正在停止符号执行...")
 
     def load_target(self):
-        p = filedialog.askopenfilename(); self.target_entry.delete(0, tk.END); self.target_entry.insert(0, p)
+        p = filedialog.askopenfilename(filetypes=[("PE files", "*.exe *.dll *.sys"), ("All files", "*.*")])
+        if not p:
+            return
+        self.target_entry.delete(0, tk.END)
+        self.target_entry.insert(0, p)
+        
+        # 检测是否为 DLL
+        try:
+            pe = pefile.PE(p)
+            is_dll = pe.FILE_HEADER.Characteristics & 0x2000 != 0  # IMAGE_FILE_DLL
+            pe.close()
+            
+            self.is_dll_target = is_dll
+            
+            if is_dll:
+                self.loader_frame.grid()
+                self.log(f"[*] 检测到 DLL 目标，请选择加载器 EXE")
+            else:
+                self.loader_frame.grid_remove()
+        except:
+            self.is_dll_target = False
+            self.loader_frame.grid_remove()
+    
     def load_patch(self):
         p = filedialog.askopenfilename(); self.patch_entry.delete(0, tk.END); self.patch_entry.insert(0, p)
+    
+    def load_loader(self):
+        p = filedialog.askopenfilename(filetypes=[("EXE files", "*.exe"), ("All files", "*.*")])
+        if p:
+            self.loader_entry.delete(0, tk.END)
+            self.loader_entry.insert(0, p)
 
     def get_file_hash(self, path):
         h = hashlib.sha256()
@@ -700,9 +762,19 @@ class BinarySpy:
     def worker_thread(self):
         target_path = self.target_entry.get().strip()
         patch_path = self.patch_entry.get().strip()
+        loader_path = self.loader_entry.get().strip()
+        
         if not target_path:
             messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
                                    "请选择目标 PE 文件" if self.current_lang == "zh" else "Please select a target PE file")
+            self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+            return
+
+        # DLL 模式需要 loader exe
+        l = LANG_CONFIG[self.current_lang]
+        if self.is_dll_target and not loader_path:
+            messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
+                                   l["need_loader"])
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
             return
 
@@ -724,6 +796,12 @@ class BinarySpy:
             self.log(f"[*] 开始分析目标文件: {target_path}")
             self.log(f"[*] 主日志: {log_file}")
             self.log(f"[*] 详细日志: {detail_log_file}")
+            
+            # DLL 模式提示
+            if self.is_dll_target:
+                self.log(l["dll_mode"])
+                self.log(f"[*] 加载器 EXE: {loader_path}")
+            
             self.log("=" * 60, detail_only=True)
             
             self.log("[*] 正在加载 PE 文件...", detail_only=True)
@@ -926,8 +1004,22 @@ class BinarySpy:
                     startupinfo = subprocess.STARTUPINFO()
                     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startupinfo.wShowWindow = subprocess.SW_HIDE
-                    p = subprocess.Popen(patched_file, shell=True, startupinfo=startupinfo,
-                                        creationflags=subprocess.CREATE_NO_WINDOW)
+                    
+                    # DLL 模式：复制 loader exe 到测试目录，然后运行
+                    if self.is_dll_target:
+                        test_dir = os.path.dirname(patched_file)
+                        loader_name = os.path.basename(loader_path)
+                        test_loader = os.path.join(test_dir, loader_name)
+                        # 复制 loader 到测试目录
+                        shutil.copy2(loader_path, test_loader)
+                        # 在测试目录中运行 loader
+                        p = subprocess.Popen(f'"{test_loader}"', shell=True, startupinfo=startupinfo,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        # EXE 模式：直接运行补丁后的文件
+                        p = subprocess.Popen(patched_file, shell=True, startupinfo=startupinfo,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                    
                     # 使用用户指定的延迟
                     delay = float(self.delay_entry.get().strip() or "3.5")
                     time.sleep(delay)
@@ -940,17 +1032,23 @@ class BinarySpy:
                         # 删除测试失败的 fuzz 文件（如果启用）
                         if self.auto_delete_var.get():
                             try:
-                                if os.path.exists(patched_file):
+                                # DLL 模式删除整个测试目录
+                                if self.is_dll_target and os.path.exists(os.path.dirname(patched_file)):
+                                    shutil.rmtree(os.path.dirname(patched_file))
+                                    self.log(f"[-] 已删除测试目录: {os.path.dirname(patched_file)}", detail_only=True)
+                                elif os.path.exists(patched_file):
                                     os.remove(patched_file)
                                     self.log(f"[-] 已删除失败文件: {patched_file}", detail_only=True)
                             except Exception as del_e:
-                                self.log(f"[!] 删除文件失败: {str(del_e)}", detail_only=True)
+                                self.log(f"[!] 删除失败: {str(del_e)}", detail_only=True)
                     p.terminate()
                 except Exception as e:
                     self.log(f"[!] 执行错误: {str(e)}", detail_only=True)
                     if self.auto_delete_var.get():
                         try:
-                            if os.path.exists(patched_file):
+                            if self.is_dll_target and os.path.exists(os.path.dirname(patched_file)):
+                                shutil.rmtree(os.path.dirname(patched_file))
+                            elif os.path.exists(patched_file):
                                 os.remove(patched_file)
                         except: pass
 
@@ -981,7 +1079,17 @@ class BinarySpy:
         """全部 Fuzz 工作线程 - 直接测试所有大于补丁大小的函数"""
         target_path = self.target_entry.get().strip()
         patch_path = self.patch_entry.get().strip()
+        loader_path = self.loader_entry.get().strip()
+        
         if not target_path:
+            self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
+            return
+        
+        # DLL 模式需要 loader exe
+        l = LANG_CONFIG[self.current_lang]
+        if self.is_dll_target and not loader_path:
+            messagebox.showwarning("警告" if self.current_lang == "zh" else "Warning",
+                                   l["need_loader"])
             self.root.after(0, lambda: self.start_btn.config(state=tk.NORMAL))
             return
 
@@ -995,6 +1103,12 @@ class BinarySpy:
             self.log("=" * 60)
             self.log(f"[*] 全部 Fuzz 模式: {target_path}")
             self.log(f"[*] 主日志: {log_file}")
+            
+            # DLL 模式提示
+            if self.is_dll_target:
+                self.log(l["dll_mode"])
+                self.log(f"[*] 加载器 EXE: {loader_path}")
+            
             self.log("=" * 60, detail_only=True)
 
             self.log("[*] 正在加载 PE 文件...", detail_only=True)
@@ -1085,18 +1199,29 @@ class BinarySpy:
                 if not patched_file:
                     self.log(f"[!] 补丁失败: {hex(addr)}")
                     continue
-
+                
                 self.log(f"[#{i+1}/{test_count}] Testing {name} @ {hex(addr)}")
-
+                
                 self.kill_calc_processes()
                 try:
-                    # 隐藏 CMD 窗口，减少 IO 开销
                     startupinfo = subprocess.STARTUPINFO()
                     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startupinfo.wShowWindow = subprocess.SW_HIDE
-                    p = subprocess.Popen(patched_file, shell=True, startupinfo=startupinfo,
-                                        creationflags=subprocess.CREATE_NO_WINDOW)
-                    # 使用用户指定的延迟
+                    
+                    # DLL 模式：复制 loader exe 到测试目录，然后运行
+                    if self.is_dll_target:
+                        test_dir = os.path.dirname(patched_file)
+                        loader_name = os.path.basename(loader_path)
+                        test_loader = os.path.join(test_dir, loader_name)
+                        # 复制 loader 到测试目录
+                        shutil.copy2(loader_path, test_loader)
+                        # 在测试目录中运行 loader
+                        p = subprocess.Popen(f'"{test_loader}"', shell=True, startupinfo=startupinfo,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        p = subprocess.Popen(patched_file, shell=True, startupinfo=startupinfo,
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+                    
                     delay = float(self.delay_entry.get().strip() or "3.5")
                     time.sleep(delay)
                     if self.kill_calc_processes():
@@ -1105,20 +1230,24 @@ class BinarySpy:
                         self.log(f"[!!!] 命中! 地址={hex(addr)}, 函数={name}", detail_only=True)
                     else:
                         self.log("log_fail")
-                        # 删除测试失败的 fuzz 文件（如果启用）
                         if self.auto_delete_var.get():
                             try:
-                                if os.path.exists(patched_file):
+                                if self.is_dll_target and os.path.exists(os.path.dirname(patched_file)):
+                                    shutil.rmtree(os.path.dirname(patched_file))
+                                    self.log(f"[-] 已删除测试目录: {os.path.dirname(patched_file)}", detail_only=True)
+                                elif os.path.exists(patched_file):
                                     os.remove(patched_file)
                                     self.log(f"[-] 已删除失败文件: {patched_file}", detail_only=True)
                             except Exception as del_e:
-                                self.log(f"[!] 删除文件失败: {str(del_e)}", detail_only=True)
+                                self.log(f"[!] 删除失败: {str(del_e)}", detail_only=True)
                     p.terminate()
                 except Exception as e:
                     self.log(f"[!] 执行错误: {str(e)}", detail_only=True)
                     if self.auto_delete_var.get():
                         try:
-                            if os.path.exists(patched_file):
+                            if self.is_dll_target and os.path.exists(os.path.dirname(patched_file)):
+                                shutil.rmtree(os.path.dirname(patched_file))
+                            elif os.path.exists(patched_file):
                                 os.remove(patched_file)
                         except:
                             pass
@@ -1163,6 +1292,10 @@ class BinarySpy:
             return f.read()
 
     def apply_patch(self, pe_path, va, data, suffix):
+        """应用补丁到 PE 文件
+        对于 DLL 目标：使用原始文件名，放在测试目录中
+        对于 EXE 目标：使用后缀命名
+        """
         try:
             pe = pefile.PE(pe_path)
             rva = va - pe.OPTIONAL_HEADER.ImageBase
@@ -1179,9 +1312,18 @@ class BinarySpy:
                 self.log(f"[!] 无法找到 VA {hex(va)} 对应的文件偏移", detail_only=True)
                 return None
             
-            out_name = f"{os.path.splitext(pe_path)[0]}_{suffix}{os.path.splitext(pe_path)[1]}"
-            shutil.copy(pe_path, out_name)
             pe.close()
+            
+            # DLL 模式：使用原始文件名，放在测试子目录
+            if self.is_dll_target:
+                test_dir = os.path.join(os.path.dirname(pe_path), f"spy_test_{suffix}")
+                os.makedirs(test_dir, exist_ok=True)
+                out_name = os.path.join(test_dir, os.path.basename(pe_path))
+            else:
+                # EXE 模式：使用后缀命名
+                out_name = f"{os.path.splitext(pe_path)[0]}_{suffix}{os.path.splitext(pe_path)[1]}"
+            
+            shutil.copy(pe_path, out_name)
             
             with open(out_name, 'r+b') as f:
                 f.seek(offset)
