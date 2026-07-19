@@ -535,10 +535,24 @@ class BinarySpy:
             
             if is_dll:
                 self.loader_frame.grid()
-                self.log(f"[*] 检测到 DLL 目标，使用全部 Fuzz 模式")
-                # DLL 目标：强制使用全部 Fuzz 模式，禁用自动分析
-                self.mode_var.set("all")
-                self.rb_auto.config(state=tk.DISABLED)
+                # DLL 目标：弹出对话框让用户选择模式
+                l = LANG_CONFIG[self.current_lang]
+                result = messagebox.askyesno(
+                    "DLL 目标检测" if self.current_lang == "zh" else "DLL Target Detected",
+                    "检测到 DLL 目标文件！\n\n是否进入全部 Fuzz 模式？\n\n点击【是】使用全部 Fuzz 模式\n点击【否】保留当前模式（与 EXE 相同逻辑）"
+                    if self.current_lang == "zh" else
+                    "DLL target file detected!\n\nEnter full fuzz mode?\n\nClick [Yes] for full fuzz mode\nClick [No] to keep current mode (same as EXE)",
+                    icon='question'
+                )
+                
+                if result:  # 用户选择全部 Fuzz 模式
+                    self.mode_var.set("all")
+                    self.rb_auto.config(state=tk.DISABLED)
+                    self.log(f"[*] 检测到 DLL 目标，使用全部 Fuzz 模式")
+                else:  # 用户选择保留当前模式
+                    self.rb_auto.config(state=tk.NORMAL)
+                    self.log(f"[*] 检测到 DLL 目标，保留当前模式（与 EXE 相同逻辑）")
+                
                 self.on_mode_change()
             else:
                 self.loader_frame.grid_remove()
@@ -1101,10 +1115,8 @@ class BinarySpy:
             # 记录目标函数详情
             self.log("=" * 60)
             self.log(f"[*] 目标函数列表 (depth<={auto_depth}):")
-            for i, fn in enumerate(valid_targets[:30]):
+            for i, fn in enumerate(valid_targets):
                 self.log(f"    [{i}] depth={fn['depth']}, {hex(fn['addr'])}: {fn['name']} (size={fn['size']}, callers={fn['call_count']})")
-            if len(valid_targets) > 30:
-                self.log(f"    ... 还有 {len(valid_targets)-30} 个函数")
             self.log("=" * 60)
 
             # 开始 fuzz - 测试所有符合条件的函数（不再限制15个）
@@ -1365,10 +1377,8 @@ class BinarySpy:
             # 记录目标函数详情
             self.log("=" * 60)
             self.log(f"[*] 目标函数列表 (共 {len(targets)} 个):")
-            for i, fn in enumerate(targets[:30]):
+            for i, fn in enumerate(targets):
                 self.log(f"    [{i}] {hex(fn['addr'])}: {fn['name']} (size={fn['size']})")
-            if len(targets) > 30:
-                self.log(f"    ... 还有 {len(targets)-30} 个函数")
             self.log("=" * 60)
 
             # 开始 fuzz
